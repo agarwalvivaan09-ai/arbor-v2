@@ -1,8 +1,298 @@
 body {
     margin: 0;
-    font-family: sans-serif;
-    background: #0a0a0a;
-    color: white;
+    font-family: "Inter", -apple-system, sans-serif;
+    
+    background: #f1f1ef; /* slightly darker stone */
+
+    color: #111;
+}
+
+/* Center layout */
+.container {
+    max-width: 640px;
+    margin: 60px auto;
+}
+
+/* Main card */
+.card {
+    background: #ffffff;
+
+    border-radius: 20px;
+    padding: 28px;
+    box-shadow: 0 15px 40px rgba(0,0,0,0.08);
+}
+
+/* Title */
+h1 {
+    font-size: 34px;
     text-align: center;
-    padding-top: 100px;
+    margin-bottom: 6px;
+}
+
+p {
+    text-align: center;
+    color: #666;
+    margin-bottom: 30px;
+}
+
+/* Section titles */
+h2 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: #444;
+}
+
+/* Profile cards (FIXED SIZE) */
+.profile-card {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    border-radius: 14px;
+
+    background: #fafaf9;
+    border: 1px solid #e7e5e4;
+
+    transition: 0.2s;
+    cursor: pointer;
+}
+
+.profile-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+}
+
+/* LEFT SIDE */
+.profile-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ICON (BIG visual upgrade) */
+.profile-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+
+    background: #111;
+    color: white;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* TEXT BLOCK */
+.profile-info {
+    display: flex;
+    flex-direction: column;
+}
+
+/* NAME */
+.profile-name {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* TYPE (subtle) */
+.profile-sub {
+    font-size: 12px;
+    color: #777;
+}
+.profile-card:active {
+    transform: scale(0.98);
+}
+
+/* Smaller text */
+.profile-name {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Tag */
+.tag {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #3730a3;
+}
+
+/* Input */
+input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+/* Toggle buttons */
+.select {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.select button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid #ddd;
+    background: #f3f4f6;
+    font-size: 13px;
+}
+
+.select button.active {
+    background: #6366f1;
+    color: white;
+    border: none;
+}
+
+
+
+/* Buttons */
+.primary {
+    margin-top: 16px;
+    padding: 14px;
+    width: 100%;
+    border-radius: 12px;
+    border: none;
+    background: #111;
+    color: white;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.secondary {
+    margin-top: 12px;
+    padding: 14px;
+    width: 100%;
+    border-radius: 12px;
+    border: none;
+    background: #f1f1f1;
+    cursor: pointer;
+}
+
+.profile-card {
+    height: 90px; /* slightly taller for balance */
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;   /* 🔥 THIS fixes vertical centering */
+    align-items: center;       /* horizontal centering */
+
+    border-radius: 14px;
+    background: #fafaf9;
+    border: 1px solid #e7e5e4;
+
+    transition: 0.2s;
+    cursor: pointer;
+}
+
+.profile-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+}
+.profiles-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.profile-name {
+    font-size: 14px;
+    font-weight: 500;
+}
+.profile-icon {
+    margin-bottom: 6px;
+}
+
+.profile-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.profile-sub {
+    font-size: 11px;
+    color: #777;
+}
+.tag {
+    font-size: 10px;
+    align-self: flex-start;
+
+    padding: 3px 8px;
+    border-radius: 999px;
+
+    background: #e7e5e4;
+    color: #444;
+}
+
+/* HERO SECTION */
+.hero {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.hero-title {
+    font-size: 48px;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.hero-sub {
+    font-size: 16px;
+    color: #555;
+    margin-bottom: 4px;
+}
+
+.hero-mini {
+    font-size: 13px;
+    color: #888;
+}
+
+/* AUTH CARD */
+.auth-card {
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+/* INPUTS */
+.auth-card input {
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+/* BUTTON VARIANTS */
+.link {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 13px;
+    margin-top: 8px;
+    cursor: pointer;
+}
+
+.link:hover {
+    text-decoration: underline;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.auth-card {
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 28px;
 }
