@@ -2,19 +2,22 @@
 <html>
 <head>
     <title>Arbor</title>
+
+    <!-- Viewport for proper scaling -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Fonts (important for premium UI) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <h1>Arbor Login</h1>
+    <!-- Root container (JS renders everything here) -->
+    <div id="app"></div>
 
-    <input id="email" placeholder="Email" /><br><br>
-    <input id="password" type="password" placeholder="Password" /><br><br>
-
-    <button id="signup">Sign Up</button>
-    <button id="login">Login</button>
-    <button id="reset">Forgot Password</button>
-
+    <!-- Main app script -->
     <script type="module" src="app.js"></script>
 
 </body>
