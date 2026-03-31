@@ -1,4 +1,4 @@
-import { signUp, login, resetPassword, observeAuth, logout } from "/firebase/auth.js";
+import { signUp, login, resetPassword, observeAuth, logout } from "./firebase/auth.js";
 import { createProfile, getProfiles } from "./profiles/profiles.js";
 import { addTransaction, getTransactions } from "./modules/transactions.js";
 import { addAsset, addLiability, getAssets, getLiabilities } from "./modules/networth.js";
