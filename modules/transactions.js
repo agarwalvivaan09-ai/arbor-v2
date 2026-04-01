@@ -11,8 +11,8 @@ import { doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // DELETE TRANSACTION
-export async function deleteTransaction(id, profileId) {
-    await deleteDoc(doc(db, "transactions", id));
+export async function deleteTransaction(transactionId, profileId) {
+    await deleteDoc(doc(db, "profiles", profileId, "transactions", transactionId));
 
     const transactions = await getTransactions(profileId);
 
@@ -34,7 +34,7 @@ export async function deleteTransaction(id, profileId) {
             if (t.to === "cash") runningBalance += t.amount;
         }
 
-        await updateDoc(doc(db, "transactions", t.id), {
+        await updateDoc(doc(db, "profiles", profileId, "transactions", t.id), {
             balance: runningBalance
         });
     }
@@ -45,14 +45,17 @@ export async function addTransaction(profileId, amount, type, category, date, fr
     const transactions = await getTransactions(profileId);
 
     const newTxn = {
-        amount: Number(amount),
-        type,
-        category,
-        date,
-        from,
-        to,
-        createdAt: Date.now()
-    };
+    amount: Number(amount),
+    type,
+    category,
+    date,
+    from,
+    to,
+    accountId: linkedId?.accountId || null,
+    assetId: linkedId?.assetId || null,
+    subtype: linkedId?.subtype || null,
+    createdAt: Date.now()
+};
 
     const updated = [...transactions, newTxn];
 
@@ -79,19 +82,20 @@ export async function addTransaction(profileId, amount, type, category, date, fr
 
     const finalTxn = updated[updated.length - 1];
 
-    await addDoc(collection(db, "transactions"), {
+   await addDoc(collection(db, "profiles", profileId, "transactions"), {
     profileId,
     amount: finalTxn.amount,
     type: finalTxn.type,
     category: finalTxn.category,
     date: finalTxn.date,
+    accountId: finalTxn.accountId || null,
+    assetId: finalTxn.assetId || null,
+    subtype: finalTxn.subtype || null,
     from: finalTxn.from || null,
     to: finalTxn.to || null,
-    linkedId: linkedId || null, // ✅ ADD THIS
     balance: finalTxn.balance,
     createdAt: serverTimestamp()
 });
-
     // UPDATE OLD TXNS
     const existing = updated.slice(0, -1);
 
@@ -100,9 +104,10 @@ await Promise.all(
     existing.map(t => {
         if (!t.id) return Promise.resolve();
 
-        return updateDoc(doc(db, "transactions", t.id), {
-            balance: t.balance
-        });
+        return updateDoc(
+            doc(db, "profiles", profileId, "transactions", t.id),
+            { balance: t.balance }
+        );
     })
 );
 }
@@ -110,7 +115,7 @@ await Promise.all(
 // GET TRANSACTIONS
 export async function getTransactions(profileId) {
     const q = query(
-        collection(db, "transactions"),
+        collection(db, "profiles", profileId, "transactions"),
         where("profileId", "==", profileId)
     );
 

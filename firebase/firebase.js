@@ -1,6 +1,4 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { firebaseConfig } from "./config.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { app } from "./db.js";
 
-const app = initializeApp(firebaseConfig);
-
-export default app;
+export const auth = getAuth(app);

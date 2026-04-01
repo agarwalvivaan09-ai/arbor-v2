@@ -5,7 +5,18 @@ import { addAsset, addLiability, getAssets, getLiabilities } from "./modules/net
 import { deleteTransaction } from "./modules/transactions.js";
 import { deleteAsset } from "./modules/networth.js";
 import { deleteLiability } from "./modules/networth.js";
-
+import { createAccount, getAccounts } from "./modules/accounts.js";
+import { createEMI, getEMIs } from "./modules/emi.js";
+import { computeFinancials } from "./modules/engine.js";
+import { deleteAccount } from "./modules/accounts.js";
+import { deleteEMI } from "./modules/emi.js";
+let state = {
+    assets: [],
+    liabilities: [],
+    transactions: [],
+    accounts: [],
+    emis: []
+};
 // ==========================
 // MAIN ROUTER
 // ==========================
@@ -114,17 +125,49 @@ document.querySelectorAll(".section h2").forEach(header => {
 });
 }
 
-let isGlobalHandlerAttached = false;
 // ==========================
 // DASHBOARD
 // ==========================
 
 async function renderDashboard(user, profileId) {
 
-    console.log("Rendering dashboard for:", profileId);
-const assets = await getAssets(profileId);
-const liabilities = await getLiabilities(profileId);
-const allTransactions = await getTransactions(profileId);
+// LOAD ONLY IF EMPTY
+if (
+    state.transactions.length === 0 ||
+    state.accounts.length === 0
+) {
+    const [assets, liabilities, allTransactions, accounts, emis] = await Promise.all([
+        getAssets(profileId),
+        getLiabilities(profileId),
+        getTransactions(profileId),
+        getAccounts(profileId),
+        getEMIs(profileId)
+    ]);
+
+    state.assets = assets;
+    state.liabilities = liabilities;
+    state.transactions = allTransactions;
+    state.accounts = accounts;
+    state.emis = emis;
+}
+
+// USE STATE
+const assets = state.assets;
+const liabilities = state.liabilities;
+const allTransactions = state.transactions;
+const accounts = state.accounts;
+const emis = state.emis;
+
+// AUTO CREATE DEFAULT ACCOUNT
+if (!accounts || accounts.length === 0) {
+    await createAccount(profileId, "Main Account", "bank");
+
+    // 🔥 UPDATE STATE
+    state.accounts = await getAccounts(profileId);
+
+    return renderDashboard(user, profileId);
+}
+
 function calculateAssetValue(a) {
     if (!a.startDate) return a.value;
 
@@ -184,32 +227,23 @@ let adjustedAssets = 0;
 assets.forEach(a => {
     const base = calculateAssetValue(a);
 
-    const transferImpact = allTransactions
-        .filter(t => t.type === "transfer" && t.linkedId === a.id)
+    const netFlow = allTransactions
+        .filter(t => t.assetId === a.id)
         .reduce((sum, t) => {
-            if (t.to === "asset") return sum + t.amount;
-            if (t.from === "asset") return sum - t.amount;
+            if (t.type === "buy") return sum + t.amount;
+            if (t.type === "sell") return sum - t.amount;
             return sum;
         }, 0);
 
-    adjustedAssets += base + transferImpact;
+    adjustedAssets += base + netFlow;
 });
 
 let adjustedLiabilities = 0;
 
 liabilities.forEach(l => {
-    let value = calculateLiabilityValue(l);
-
-    allTransactions.forEach(t => {
-        if (t.type === "transfer" && t.linkedId === l.id) {
-    if (t.from === "liability") value += t.amount;
-    if (t.to === "liability") value -= t.amount;
-}
-    });
-
-    adjustedLiabilities += value;
+    adjustedLiabilities += calculateLiabilityValue(l);
 });
-const netWorth = adjustedAssets - adjustedLiabilities;
+
 
   
 
@@ -229,156 +263,32 @@ const txnMonth = txnDate.toISOString().slice(0, 7);
         return txnMonth === selectedMonth;
     });
 }
-    transactions.sort((a, b) => {
-    const d = new Date(b.date) - new Date(a.date);
-    if (d !== 0) return d;
-    return b.createdAt?.seconds - a.createdAt?.seconds;
+transactions.sort((a, b) => {
+    const t1 = new Date(b.date).getTime();
+    const t2 = new Date(a.date).getTime();
+
+    if (!isNaN(t1) && !isNaN(t2) && t1 !== t2) return t1 - t2;
+
+    return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
 });
 
-    let income = 0;
-let expense = 0;
-
-transactions.forEach(t => {
-    if (t.type === "income") income += t.amount;
-    if (t.type === "expense") expense += t.amount;
-});
-
-// CORE
-
-const sortedForBalance = [...allTransactions].sort((a, b) => {
-    const d = new Date(a.date) - new Date(b.date);
-    if (d !== 0) return d;
-    return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0);
-});
-
-let cashBalance = 0;
-
-sortedForBalance.forEach(t => {
-    if (t.type === "income") cashBalance += t.amount;
-    else if (t.type === "expense") cashBalance -= t.amount;
-    else if (t.type === "transfer") {
-        if (t.from === "cash") cashBalance -= t.amount;
-        if (t.to === "cash") cashBalance += t.amount;
-    }
-});
-
-
-
-// SMART METRICS
-const savingsRate = income > 0 ? (income - expense) / income : 0;
-
-// EMERGENCY COVERAGE (months)
-const emergencyCoverage = expense > 0
-    ? (cashBalance / expense)
-    : 0;
-// CATEGORY ANALYSIS
-const categoryMap = {};
-
-transactions.forEach(t => {
-    if (t.type !== "expense") return;
-
-    if (!categoryMap[t.category]) categoryMap[t.category] = 0;
-    categoryMap[t.category] += t.amount;
-});
-
-// TOP EXPENSE CATEGORY
-let topCategory = "—";
-let maxSpend = 0;
-
-Object.entries(categoryMap).forEach(([cat, val]) => {
-    if (val > maxSpend) {
-        maxSpend = val;
-        topCategory = cat;
-    }
-});
-
-
-let status = "Vulnerable";
-
-if (savingsRate >= 0.4) status = "Strong";
-else if (savingsRate >= 0.15) status = "Stable";
-
-const monthlyExpenseMap = {};
-
-
-allTransactions.forEach(t => {
-    if (t.type !== "expense" || !t.date) return;
-
-    const month = new Date(t.date).toISOString().slice(0, 7);
-
-    if (!monthlyExpenseMap[month]) monthlyExpenseMap[month] = 0;
-
-    monthlyExpenseMap[month] += t.amount;
-});
-// MONTHLY INCOME
-const monthlyIncomeMap = {};
-
-allTransactions.forEach(t => {
-    if (t.type !== "income" || !t.date) return;
-
-    const month = new Date(t.date).toISOString().slice(0, 7);
-
-    if (!monthlyIncomeMap[month]) monthlyIncomeMap[month] = 0;
-
-    monthlyIncomeMap[month] += t.amount;
-});
-
-// NET CASH FLOW
-const allMonths = new Set([
-    ...Object.keys(monthlyIncomeMap),
-    ...Object.keys(monthlyExpenseMap)
-]);
-
-const monthlyCashflow = {};
-
-allMonths.forEach(month => {
-    const income = monthlyIncomeMap[month] || 0;
-    const expense = monthlyExpenseMap[month] || 0;
-
-    monthlyCashflow[month] = income - expense;
-});
-
-// LAST MONTH FLOW
-const sortedCashflowMonths = Object.keys(monthlyCashflow)
-    .sort((a, b) => new Date(a) - new Date(b));
-const lastMonth = sortedCashflowMonths[sortedCashflowMonths.length - 1];
-const lastMonthFlow = lastMonth ? monthlyCashflow[lastMonth] : 0;
-const sortedMonths = Object.keys(monthlyExpenseMap)
-    .sort((a, b) => new Date(a) - new Date(b));
-
-const last3MonthsList = sortedMonths.slice(-3);
-
-const monthlyValues = last3MonthsList.map(m => monthlyExpenseMap[m]);
-
-let avgExpense = 0;
-
-if (monthlyValues.length === 0) {
-    avgExpense = 0;
-} else if (monthlyValues.length === 1) {
-    // Only 1 month → don't call it "average"
-    avgExpense = monthlyValues[0];
-} else {
-    avgExpense =
-        monthlyValues.reduce((a, b) => a + b, 0) /
-        monthlyValues.length;
-}
-    
-// AVG TRANSACTION SIZE (NEW METRIC)
-const expenseTransactions = transactions.filter(t => t.type === "expense");
-
-const avgTransaction = expenseTransactions.length > 0
-    ? expenseTransactions.reduce((sum, t) => sum + t.amount, 0) /
-      expenseTransactions.length
-    : 0;
-
-// MRR (Salary-based for now)
-const recurringIncome = allTransactions.filter(t =>
-    t.type === "income" &&
-    t.category &&
-    t.category.toLowerCase().includes("salary")
-);
-
-const MRR = recurringIncome.reduce((sum, t) => sum + t.amount, 0);
+const metrics = computeFinancials(state);
+const netWorth = metrics.netWorth;
+const {
+    income,
+    expense,
+    totalCash,
+    savingsRate,
+    emergencyCoverage,
+    MRR,
+    balances: accountBalances,
+    monthlySavings,
+    topCategory,
+    status,
+    avgExpense,
+    avgTransaction,
+    lastMonthFlow
+} = computeFinancials(state);
    document.body.innerHTML = `
 <div class="app">
 
@@ -417,9 +327,9 @@ const MRR = recurringIncome.reduce((sum, t) => sum + t.amount, 0);
         <strong>₹${expense}</strong>
     </div>
 
-    <div class="metric-box ${cashBalance>=0?'green':'red'}">
-    <div>Cash</div>
-    <strong>₹${cashBalance}</strong>
+    <div class="metric-box ${totalCash>=0?'green':'red'}">
+    <div>Total Cash</div>
+<strong>₹${Math.round(totalCash)}</strong>
 </div>
 
     
@@ -465,7 +375,26 @@ const MRR = recurringIncome.reduce((sum, t) => sum + t.amount, 0);
     <strong>₹${MRR}</strong>
 </div>
 </div>
+<div class="section">
+<h2 class="toggle">
+    <span>Accounts</span>
+    <span class="chevron">⌄</span>
+</h2>
+<div class="content">
 
+${accounts.map(a => `
+    <div class="list-item">
+        <div>
+            <div class="title">${a.name}</div>
+            <div class="sub">${a.type}</div>
+        </div>
+        <div>₹${Math.round(accountBalances[a.id] || 0)}</div>
+        <button class="delete-account" data-id="${a.id}">×</button>
+    </div>
+`).join("")}
+
+</div>
+</div>
             <!-- TRANSACTIONS -->
             <div class="section">
                 <h2 class="toggle">
@@ -510,10 +439,10 @@ const MRR = recurringIncome.reduce((sum, t) => sum + t.amount, 0);
                         <div>₹${Math.round(
     calculateAssetValue(a) +
     allTransactions
-        .filter(t => t.type === "transfer" && t.linkedId === a.id)
+        .filter(t => t.assetId === a.id)
         .reduce((sum, t) => {
-            if (t.to === "asset") return sum + t.amount;
-            if (t.from === "asset") return sum - t.amount;
+            if (t.type === "buy") return sum + t.amount;
+            if (t.type === "sell") return sum - t.amount;
             return sum;
         }, 0)
 )}</div>
@@ -537,82 +466,76 @@ const MRR = recurringIncome.reduce((sum, t) => sum + t.amount, 0);
                             <div class="title">${l.name}</div>
                             <div class="sub">${l.rate || 0}%</div>
                         </div>
-                        <div class="red">₹${Math.round(
-    calculateLiabilityValue(l) +
-    allTransactions
-        .filter(t => t.type === "transfer" && t.linkedId === l.id)
-        .reduce((sum, t) => {
-            if (t.from === "liability") return sum + t.amount;
-            if (t.to === "liability") return sum - t.amount;
-            return sum;
-        }, 0)
-)}</div>
+                        <div class="red">₹${Math.round(calculateLiabilityValue(l))}</div>
                         <button class="delete-liability" data-id="${l.id}">×</button>
                     </div>
                 `).join("")}
             </div>
+</div>
+
+<div class="section">
+<h2 class="toggle">
+    <span>EMIs</span>
+    <span class="chevron">⌄</span>
+</h2>
+<div class="content">
+
+${emis.map(e => `
+    <div class="list-item">
+        <div>
+            <div class="title">${e.name || "EMI"}</div>
+            <div class="sub">Due: ${new Date(e.nextDate).toLocaleDateString()}</div>
+        </div>
+        <div class="red">₹${e.amount}</div>
+        <button class="delete-emi" data-id="${e.id}">×</button>
+    </div>
+`).join("")}
+
+</div>
 </div>
 <div class="overlay" id="overlay"></div>
         </div>
 
         <!-- RIGHT PANEL -->
         <div class="side">
+<h3>Add Account</h3>
 
+<input id="accName" placeholder="Account Name" />
+
+<select id="accType">
+  <option value="cash">Cash</option>
+  <option value="bank">Bank</option>
+  <option value="wallet">Wallet</option>
+</select>
+<select id="accSubType" style="display:none;">
+  <option value="savings">Savings</option>
+  <option value="current">Current</option>
+</select>
+
+<input id="accRate" placeholder="Interest %" style="display:none;" />
+<button id="addAccount">Add Account</button>
             <h3>Add Transaction</h3>
 
-            <div class="form-group">
+<select id="txnType">
+  <option value="income">Income</option>
+  <option value="expense">Expense</option>
+  <option value="buy">Buy Asset</option>
+  <option value="sell">Sell Asset</option>
+</select>
+
+<select id="txnSubType"></select>
+
+<div class="form-group">
     <input id="amount" placeholder="Amount" />
-    <input id="category" placeholder="Category" />
+    <input id="category" placeholder="Description (e.g. Rent, Salary)" />
+    
+    <select id="accountSelect"></select>
+    <select id="assetSelect" style="display:none;"></select>
+
     <input id="date" type="date" />
 </div>
 
-<div class="button-group txn-type">
-    <button id="incomeBtn" class="active">Income</button>
-    <button id="expenseBtn">Expense</button>
-    <button id="transferBtn">Transfer</button>
-</div>
-
-<div id="transferFields" class="transfer-ui">
-
-    <div class="transfer-group">
-        <div class="label">From</div>
-        <div class="mini-toggle" id="fromGroup">
-            <button data-value="cash" class="active">Cash</button>
-            <button data-value="asset">Asset</button>
-            <button data-value="liability">Debt</button>
-        </div>
-    </div>
-
-    <div class="transfer-group">
-        <div class="label">To</div>
-        <div class="mini-toggle" id="toGroup">
-            <button data-value="cash">Cash</button>
-            <button data-value="asset" class="active">Asset</button>
-            <button data-value="liability">Debt</button>
-        </div>
-    
-</div>
-<div class="transfer-accounts">
-
-    <div class="account-select">
-        <label>From Account</label>
-        <select id="fromAccount"></select>
-    </div>
-
-    <div class="account-select">
-        <label>To Account</label>
-        <select id="toAccount"></select>
-    </div>
-
-</div>
-       
-
-       
-</div>
-
-
-
-            <button id="addTxn" class="btn-primary">Add Transaction</button>
+<button id="addTxn" class="btn-primary">Add</button>
 
             <h3>Add Asset</h3>
 
@@ -675,176 +598,228 @@ const MRR = recurringIncome.reduce((sum, t) => sum + t.amount, 0);
 
             <button id="addLiability" class="btn-primary">Add Liability</button>
 
-        </div>
+        
+<h3>Add EMI</h3>
 
+<input id="emiName" placeholder="Loan Name (e.g. Car Loan)" />
+
+<input id="emiPrincipal" placeholder="Principal Amount" />
+<input id="emiRate" placeholder="Interest % (Annual)" />
+<input id="emiTenure" placeholder="Tenure (Months)" />
+
+<input id="emiAmount" placeholder="EMI Amount" />
+<input id="emiDate" type="date" />
+
+<button id="addEMI">Add EMI</button>
     </div>
+</div>
 </div>
 `;
 const panel = document.querySelector(".side");
+document.getElementById("addAccount").onclick = async () => {
+    const name = document.getElementById("accName").value;
+    const accType = document.getElementById("accType").value;
+const subtype = document.getElementById("accSubType").value;
+    if (!name) return alert("Enter name");
+
+    const rate = Number(document.getElementById("accRate").value) || 0;
+
+await createAccount(profileId, name, accType, subtype, rate);
+
+// update state
+state.accounts = await getAccounts(profileId);
+
+// re-render
+renderDashboard(user, profileId);
+    closePanel();
+
+};
 const overlay = document.getElementById("overlay");
-    let type = "income";
-let from = "cash";
-let to = "asset";
+function openPanel() {
+    panel.classList.add("open");
+    overlay.classList.add("show");
+}
+
+function closePanel() {
+    panel.classList.remove("open");
+    overlay.classList.remove("show");
+}
+
+let selectedAssetId = null;
 let assetType = "appreciating";
 let compounding = "simple";
 let liabilityType = "simple";
 
-function updateAccountSelectors() {
-    const fromSel = document.getElementById("fromAccount");
-    const toSel = document.getElementById("toAccount");
 
-    if (!fromSel || !toSel) return;
 
-    // RESET
-    fromSel.innerHTML = "";
-    toSel.innerHTML = "";
 
-    // ===== FROM SIDE =====
-    if (from === "cash") {
-        fromSel.innerHTML = `<option>Cash Balance (₹${Math.round(cashBalance)})</option>`;
-        fromSel.disabled = true;
-    } 
-    
-    else if (from === "asset") {
-        if (assets.length === 0) {
-            fromSel.innerHTML = `<option>No assets available</option>`;
-            fromSel.disabled = true;
-        } else {
-            fromSel.innerHTML = `<option value="">Select Asset</option>`;
-            assets.forEach(a => {
-                fromSel.innerHTML += `<option value="${a.id}">${a.name}</option>`;
-            });
-            fromSel.disabled = false;
-        }
-    }
 
-    else if (from === "liability") {
-        if (liabilities.length === 0) {
-            fromSel.innerHTML = `<option>No liabilities available</option>`;
-            fromSel.disabled = true;
-        } else {
-            fromSel.innerHTML = `<option value="">Select Liability</option>`;
-            liabilities.forEach(l => {
-                fromSel.innerHTML += `<option value="${l.id}">${l.name}</option>`;
-            });
-            fromSel.disabled = false;
-        }
-    }
 
-    // ===== TO SIDE =====
-    if (to === "cash") {
-        toSel.innerHTML = `<option>Cash (no account)</option>`;
-        toSel.disabled = true;
-    } 
-    
-    else if (to === "asset") {
-        if (assets.length === 0) {
-            toSel.innerHTML = `<option>No assets available</option>`;
-            toSel.disabled = true;
-        } else {
-            toSel.innerHTML = `<option value="">Select Asset</option>`;
-            assets.forEach(a => {
-                toSel.innerHTML += `<option value="${a.id}">${a.name}</option>`;
-            });
-            toSel.disabled = false;
-        }
-    }
+const assetSelect = document.getElementById("assetSelect") || { style: {} };
+const accountSelect = document.getElementById("accountSelect");
+const txnTypeEl = document.getElementById("txnType");
+if (!txnTypeEl) {
+    console.error("txnType not found");
+}
+const txnSubTypeEl = document.getElementById("txnSubType") || {
+    value: null,
+    innerHTML: ""
+};
 
-    else if (to === "liability") {
-        if (liabilities.length === 0) {
-            toSel.innerHTML = `<option>No liabilities available</option>`;
-            toSel.disabled = true;
-        } else {
-            toSel.innerHTML = `<option value="">Select Liability</option>`;
-            liabilities.forEach(l => {
-                toSel.innerHTML += `<option value="${l.id}">${l.name}</option>`;
-            });
-            toSel.disabled = false;
-        }
+const subtypeMap = {
+    income: ["salary", "business", "interest", "dividend", "capital_gain"],
+    expense: ["fixed", "variable", "discretionary"],
+    buy: ["investment"],
+    sell: ["liquidation"]
+};
+
+function updateSubtypes() {
+    const type = txnTypeEl.value;
+
+    txnSubTypeEl.innerHTML = "";
+
+    if (!subtypeMap[type]) return;
+
+subtypeMap[type].forEach(s => {
+        txnSubTypeEl.innerHTML += `<option value="${s}">${s}</option>`;
+    });
+
+    // asset visibility
+    if (type === "buy" || type === "sell") {
+        assetSelect.style.display = "block";
+        populateAssets();
+    } else {
+        assetSelect.style.display = "none";
     }
 }
 
-// FROM buttons
-document.querySelectorAll("#fromGroup button").forEach(btn => {
-    btn.onclick = () => {
-        document.querySelectorAll("#fromGroup button").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-
-        from = btn.dataset.value;
-        updateAccountSelectors();// ✅ CORRECT PLACE
-    };
-});
-
-
-// TO buttons
-document.querySelectorAll("#toGroup button").forEach(btn => {
-    btn.onclick = () => {
-        document.querySelectorAll("#toGroup button").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-
-        to = btn.dataset.value;
-        updateAccountSelectors(); // ✅ CORRECT PLACE
-    };
-});
-
-const incomeBtn = document.getElementById("incomeBtn");
-const expenseBtn = document.getElementById("expenseBtn");
-
-
-const transferBtn = document.getElementById("transferBtn");
-const transferFields = document.getElementById("transferFields");
-
-if (transferBtn && incomeBtn && expenseBtn && transferFields) {
-
-    transferBtn.onclick = () => {
-    type = "transfer";
-
-    transferBtn.classList.add("active");
-    incomeBtn.classList.remove("active");
-    expenseBtn.classList.remove("active");
-
-    transferFields.style.display = "block";
-
-    from = "cash";
-to = "asset";
-// Sync UI buttons
-document.querySelectorAll("#fromGroup button").forEach(b => b.classList.remove("active"));
-document.querySelector('#fromGroup [data-value="asset"]').classList.add("active");
-
-document.querySelectorAll("#toGroup button").forEach(b => b.classList.remove("active"));
-document.querySelector('#toGroup [data-value="cash"]').classList.add("active");
-    updateAccountSelectors();
-};
-
-    incomeBtn.onclick = () => {
-    type = "income";
-
-    incomeBtn.classList.add("active");
-    expenseBtn.classList.remove("active");
-    transferBtn.classList.remove("active");
-
-    transferFields.style.display = "none";
-
-    // 🔥 RESET
-    from = "cash";
-    to = "asset";
-};
-
-    expenseBtn.onclick = () => {
-    type = "expense";
-
-    expenseBtn.classList.add("active");
-    incomeBtn.classList.remove("active");
-    transferBtn.classList.remove("active");
-
-    transferFields.style.display = "none";
-
-    // 🔥 RESET
-    from = "cash";
-    to = "asset";
-};
-updateAccountSelectors();
+txnTypeEl.onchange = updateSubtypes;
+try {
+    updateSubtypes();
+} catch (e) {
+    console.error("Subtype init error:", e);
 }
+const accTypeEl = document.getElementById("accType");
+const accSubTypeEl = document.getElementById("accSubType");
+const accRateEl = document.getElementById("accRate");
+
+accTypeEl.onchange = () => {
+    if (accTypeEl.value === "bank") {
+        accSubTypeEl.style.display = "block";
+        accRateEl.style.display = "block";
+    } else {
+        accSubTypeEl.style.display = "none";
+        accRateEl.style.display = "none";
+    }
+};
+// ASSET TYPE TOGGLE
+document.getElementById("appBtn").onclick = () => {
+    assetType = "appreciating";
+    document.getElementById("appBtn").classList.add("active");
+    document.getElementById("depBtn").classList.remove("active");
+};
+
+document.getElementById("depBtn").onclick = () => {
+    assetType = "depreciating";
+    document.getElementById("depBtn").classList.add("active");
+    document.getElementById("appBtn").classList.remove("active");
+};
+
+// COMPOUNDING
+document.getElementById("simpleAsset").onclick = () => {
+    compounding = "simple";
+    document.getElementById("simpleAsset").classList.add("active");
+    document.getElementById("compoundAsset").classList.remove("active");
+};
+
+document.getElementById("compoundAsset").onclick = () => {
+    compounding = "compound";
+    document.getElementById("compoundAsset").classList.add("active");
+    document.getElementById("simpleAsset").classList.remove("active");
+};
+
+// LIABILITY TYPE
+document.getElementById("simpleLiability").onclick = () => {
+    liabilityType = "simple";
+    document.getElementById("simpleLiability").classList.add("active");
+    document.getElementById("compoundLiability").classList.remove("active");
+};
+
+document.getElementById("compoundLiability").onclick = () => {
+    liabilityType = "compound";
+    document.getElementById("compoundLiability").classList.add("active");
+    document.getElementById("simpleLiability").classList.remove("active");
+};
+const addEMIBtn = document.getElementById("addEMI");
+
+if (addEMIBtn) {
+    addEMIBtn.onclick = async () => {
+        const name = document.getElementById("emiName").value;
+
+const principal = Number(document.getElementById("emiPrincipal").value);
+const rate = Number(document.getElementById("emiRate").value);
+const tenure = Number(document.getElementById("emiTenure").value);
+
+const amount = Number(document.getElementById("emiAmount").value);
+const nextDate = document.getElementById("emiDate").value;
+let accountId = document.getElementById("accountSelect")?.value;
+
+if (!accountId && accounts.length > 0) {
+    accountId = accounts[0].id;
+}
+        if (!name || !principal || !rate || !tenure || !amount || !nextDate) {
+    return alert("Fill all EMI fields properly");
+}
+
+       const newEMI = {
+    id: "temp-" + Date.now(),
+    name,
+    principal,
+    rate,
+    tenure,
+    amount,
+    nextDate,
+    accountId,
+    remainingPrincipal: principal
+};
+
+        state.emis.push(newEMI);
+
+        renderDashboard(user, profileId);
+
+        createEMI(profileId, {
+    name,
+    amount,        // EMI amount
+    principal,     // total loan
+    rate,          // annual %
+    tenure,        // months
+    startDate,
+    nextDate,
+    accountId
+});
+    };
+}
+function populateAccounts() {
+    accountSelect.innerHTML = `<option value="">Select Account</option>`;
+    accounts.forEach(a => {
+        accountSelect.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+    });
+}
+
+populateAccounts();
+function populateAssets() {
+    assetSelect.innerHTML = `<option value="">Select Asset</option>`;
+    assets.forEach(a => {
+        assetSelect.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+    });
+}
+
+
+
+
+
+
+
 
 const addTxnBtn = document.getElementById("addTxn");
 
@@ -868,56 +843,60 @@ if (addTxnBtn) {
         const rawDate = document.getElementById("date").value;
         const date = rawDate ? rawDate : new Date().toISOString().slice(0,10);
 
-        if (type === "transfer") {
+        
 
-            if (from === to) {
-                alert("Invalid transfer: Same account");
-                return;
-            }
+        
 
-            if (
-                (from === "asset" && to === "asset") ||
-                (from === "liability" && to === "liability") ||
-                (from === "asset" && to === "liability") ||
-                (from === "liability" && to === "asset")
-            ) {
-                alert("Invalid transfer type");
-                return;
-            }
-        }
 
-        let fromAccount = document.getElementById("fromAccount")?.value || null;
-let toAccount = document.getElementById("toAccount")?.value || null;
-
-if (type === "transfer") {
-
-    if (from === to && fromAccount === toAccount) {
-        alert("Cannot transfer to same account");
-        return;
-    }
-
-    if ((from === "asset" || from === "liability") && !fromAccount) {
-        alert("Select FROM account");
-        return;
-    }
-
-    if ((to === "asset" || to === "liability") && !toAccount) {
-        alert("Select TO account");
-        return;
-    }
-}
 
      
 
-        await addTransaction(profileId, amt, type, cat, date, from, to, {
-    fromAccount,
-    toAccount
-});
+        const selectedAssetId = document.getElementById("assetSelect")?.value || null;
+let accountId = document.getElementById("accountSelect")?.value;
+
+// AUTO DEFAULT
+if (!accountId && accounts.length > 0) {
+    accountId = accounts[0].id;
+}
+
+const type = txnTypeEl.value;
+
+if ((type === "buy" || type === "sell") && !selectedAssetId) {
+    alert("Select asset");
+    return;
+}
+
+const subtype = txnSubTypeEl ? txnSubTypeEl.value : null;
+
+await addTransaction(
+    profileId,
+    amt,
+    type,
+    cat,
+    date,
+    null,
+    null,
+    {
+        assetId: selectedAssetId,
+        accountId: accountId,
+        subtype: subtype
+    }
+);
+
+// fetch fresh data
+state.transactions = await getTransactions(profileId);
+
+// render
+renderDashboard(user, profileId);
+
+
+
 
         document.getElementById("amount").value = "";
         document.getElementById("category").value = "";
 
-        renderDashboard(user, profileId);
+        closePanel();
+
     };
 }
     const addAssetBtn = document.getElementById("addAsset");
@@ -937,7 +916,22 @@ const compoundingType = compounding;
     return alert("Start date is required");
 }
 
-   await addAsset(
+   const newAsset = {
+    id: "temp-" + Date.now(),
+    name,
+    value,
+    rate,
+    type: assetType,
+    startDate,
+    endDate,
+    compounding: compoundingType
+};
+
+state.assets.push(newAsset);
+
+renderDashboard(user, profileId);
+
+addAsset(
     profileId,
     name,
     value,
@@ -947,7 +941,6 @@ const compoundingType = compounding;
     endDate,
     compoundingType
 );
-    renderDashboard(user, profileId);
 };
 }
 const addLiabilityBtn = document.getElementById("addLiability");
@@ -964,8 +957,21 @@ const liabilityMode = liabilityType;
     if (!name || !value || !startDate) {
     return alert("Start date is required");
 }
+const newLiability = {
+    id: "temp-" + Date.now(),
+    name,
+    value,
+    rate,
+    startDate,
+    endDate,
+    type: liabilityMode
+};
 
-    await addLiability(
+state.liabilities.push(newLiability);
+
+renderDashboard(user, profileId);
+
+addLiability(
     profileId,
     name,
     value,
@@ -974,52 +980,123 @@ const liabilityMode = liabilityType;
     endDate,
     liabilityMode
 );
-    renderDashboard(user, profileId);
+
 };
 }
-if (!isGlobalHandlerAttached) {
+document.body.onclick = async (e) => {
+    // DELETE ACCOUNT
+if (e.target.classList.contains("delete-account")) {
+    const id = e.target.dataset.id;
 
-    document.body.addEventListener("click", async (e) => {
+    // 🚫 prevent deleting last account
+    if (state.accounts.length <= 1) {
+        alert("At least one account required");
+        return;
+    }
 
+    // optimistic UI
+    state.accounts = state.accounts.filter(a => a.id !== id);
+    renderDashboard(user, profileId);
+
+    // backend sync
+    deleteAccount(id, profileId)
+        .then(async () => {
+            state.accounts = await getAccounts(profileId);
+        })
+        .catch(err => console.error(err));
+}
+
+// DELETE EMI
+if (e.target.classList.contains("delete-emi")) {
+    const id = e.target.dataset.id;
+
+    state.emis = state.emis.filter(e => e.id !== id);
+    renderDashboard(user, profileId);
+
+    deleteEMI(id, profileId)
+        .then(async () => {
+            state.emis = await getEMIs(profileId);
+        })
+        .catch(err => console.error(err));
+}
     // BACK
     if (e.target.id === "backBtn") {
+        state = {
+        assets: [],
+        liabilities: [],
+        transactions: [],
+        accounts: [],
+        emis: []
+    };
         localStorage.removeItem("selectedProfile");
         renderApp(user);
     }
 
     // LOGOUT
     if (e.target.id === "logout") {
+
+        state = {
+        assets: [],
+        liabilities: [],
+        transactions: [],
+        accounts: [],
+        emis: []
+    };
         await logout();
     }
 
     // PANEL OPEN
-    if (e.target.id === "togglePanel") {
-        panel?.classList.add("open");
-        document.getElementById("overlay")?.classList.add("show");
+    if (e.target.closest("#togglePanel")) {
+        openPanel();
     }
 
     // PANEL CLOSE
-    if (e.target.id === "overlay") {
-        panel?.classList.remove("open");
-        document.getElementById("overlay")?.classList.remove("show");
+    if (e.target.closest("#overlay")) {
+        closePanel();
     }
 
     // DELETE TXN
-    if (e.target.classList.contains("delete")) {
-        await deleteTransaction(e.target.dataset.id, profileId);
-        renderDashboard(user, profileId);
-    }
+ if (e.target.classList.contains("delete")) {
+    const id = e.target.dataset.id;
+
+    // 🚫 block temp ids
+    if (id.startsWith("temp-")) return;
+
+    // optimistic UI
+    state.transactions = state.transactions.filter(t => t.id !== id);
+    renderDashboard(user, profileId);
+
+    // backend sync + refetch
+    deleteTransaction(id, profileId)
+        .then(async () => {
+            state.transactions = await getTransactions(profileId);
+        })
+        .catch(err => {
+            console.error(err);
+        });
+}
 
     // DELETE ASSET
     if (e.target.classList.contains("delete-asset")) {
-        await deleteAsset(e.target.dataset.id);
-        renderDashboard(user, profileId);
+       // remove from state
+state.assets = state.assets.filter(a => a.id !== e.target.dataset.id);
+
+// instant render
+renderDashboard(user, profileId);
+
+// backend
+await deleteAsset(profileId, e.target.dataset.id);
+
     }
 
     // DELETE LIABILITY
     if (e.target.classList.contains("delete-liability")) {
-        await deleteLiability(e.target.dataset.id);
-        renderDashboard(user, profileId);
+       state.liabilities = state.liabilities.filter(l => l.id !== e.target.dataset.id);
+
+renderDashboard(user, profileId);
+
+await deleteLiability(profileId, e.target.dataset.id);
+  
     }
 
     // COLLAPSE
@@ -1027,10 +1104,7 @@ if (!isGlobalHandlerAttached) {
         const section = e.target.closest(".section");
         section.classList.toggle("collapsed");
     }
-});
-
-    isGlobalHandlerAttached = true;
-}
+};
 
 }
 // ==========================
@@ -1063,9 +1137,7 @@ observeAuth(async (user) => {
 
         </div>
         `;
-        setTimeout(() => {
-    updateAccountSelectors();
-}, 0);
+        
 
         const emailInput = document.getElementById("email");
         const passwordInput = document.getElementById("password");

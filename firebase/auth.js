@@ -6,7 +6,7 @@ import {
   signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-import app from "./firebase.js";
+import { app } from "./db.js";
 
 const auth = getAuth(app);
 
