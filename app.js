@@ -24,11 +24,232 @@ let state = {
 async function renderApp(user) {
     const selectedProfile = localStorage.getItem("selectedProfile");
 
-    if (selectedProfile) {
-        await renderDashboard(user, selectedProfile);
-    } else {
+    try {
+        if (selectedProfile) {
+            await renderDashboard(user, selectedProfile);
+        } else {
+            await renderProfiles(user);
+        }
+    } catch (error) {
+        console.error("App render failed:", error);
+        localStorage.removeItem("selectedProfile");
         await renderProfiles(user);
     }
+}
+
+function getAuthErrorMessage(error) {
+    const code = error?.code || "";
+
+    const messages = {
+        "auth/email-already-in-use": "That email already has an account. Try logging in.",
+        "auth/invalid-email": "Enter a valid email address.",
+        "auth/invalid-credential": "Email or password is incorrect.",
+        "auth/missing-password": "Enter your password.",
+        "auth/network-request-failed": "Network error. Check your connection and try again.",
+        "auth/too-many-requests": "Too many attempts. Wait a bit and try again.",
+        "auth/user-not-found": "No account found for that email.",
+        "auth/weak-password": "Password must be at least 6 characters.",
+        "auth/wrong-password": "Email or password is incorrect."
+    };
+
+    return messages[code] || error?.message || "Something went wrong. Please try again.";
+}
+
+function escapeHTML(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+function formatMoney(value) {
+    return `₹${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
+}
+
+function readableType(type) {
+    const labels = {
+        income: "Income",
+        expense: "Expense",
+        asset_buy: "Buy asset",
+        asset_sell: "Sell asset",
+        liability_add: "New loan",
+        liability_payment: "Loan payment",
+        cash: "Cash",
+        bank: "Bank",
+        wallet: "Wallet"
+    };
+
+    return labels[type] || type || "Other";
+}
+
+function renderGuideContent() {
+    const guideSections = [
+        {
+            title: "1. What Arbor Tracks",
+            body: [
+                "Arbor separates your financial life into accounts, activity, assets, liabilities, and EMI schedules. Accounts are the places where cash sits. Activity is everything that changes those balances. Assets and liabilities explain what you own and what you owe, so the dashboard can calculate net worth instead of only showing cash.",
+                "A profile is a separate workspace. Use different profiles when the money should not mix, such as Personal, Business, Family, Studio, or Startup."
+            ]
+        },
+        {
+            title: "2. Accounts Are Real Cash Locations",
+            body: [
+                "Create an account for each real place where money is held: a bank account, cash wallet, UPI wallet, credit operating account, or business current account. The opening balance should be the balance on the day you start tracking.",
+                "Do not create accounts for categories like rent, food, marketing, payroll, or school fees. Those are transaction descriptions/categories, not cash locations."
+            ]
+        },
+        {
+            title: "3. Income",
+            body: [
+                "Use Income when money enters an account and does not create a new debt. Salary, business revenue, interest, dividends, refunds, and gifts can all be income depending on your use case.",
+                "Income increases the selected account balance and contributes to Income, Savings, Monthly Flow, MRR when subtype is salary, and overall cash health."
+            ]
+        },
+        {
+            title: "4. Expenses",
+            body: [
+                "Use Expense when money leaves an account for spending. Examples include rent, groceries, subscriptions, fuel, payroll, vendors, travel, or discretionary purchases.",
+                "Expenses reduce the selected account balance. They also feed Expense, Savings, Emergency Coverage, Top Spend, 3M Avg Expense, Avg Transaction Size, and Monthly Flow."
+            ]
+        },
+        {
+            title: "5. Buying Assets",
+            body: [
+                "Use Buy Asset when you convert cash into something you own: investments, equipment, gold, property, vehicles, inventory, or a valuable item. Arbor records the asset and deducts the purchase amount from the selected account.",
+                "This keeps net worth balanced. Cash goes down, assets go up, and net worth changes later through appreciation, depreciation, sale value, or interest assumptions."
+            ]
+        },
+        {
+            title: "6. Selling Assets",
+            body: [
+                "Use Sell Asset when money comes back from an asset. Select the asset being sold and the account receiving the money.",
+                "The sale increases cash and reduces the tracked asset value by the sale amount. Use clear descriptions so partial exits and full exits remain easy to audit later."
+            ]
+        },
+        {
+            title: "7. New Loans",
+            body: [
+                "Use New Loan when borrowed money enters an account. Arbor increases cash, creates a liability, and can optionally create an EMI schedule.",
+                "Do not record borrowed money as normal income. A loan improves cash today but creates an obligation, so it must appear as a liability for net worth to stay correct."
+            ]
+        },
+        {
+            title: "8. Loan Payments And EMIs",
+            body: [
+                "Use Repay Loan when you manually pay a liability. Select the loan, enter the payment amount, and Arbor reduces cash while reducing the outstanding liability.",
+                "If an EMI schedule exists and the next date is due, Arbor also treats the scheduled EMI as an expense and cash outflow. Delete old EMI schedules when they are no longer active."
+            ]
+        },
+        {
+            title: "9. Dates Matter",
+            body: [
+                "The transaction date controls the ledger order, monthly cash flow, recent average expenses, and activity history. Use the real date of the event whenever possible.",
+                "Assets and liabilities can also use start dates. If a start date is in the future, Arbor does not count that asset or liability yet."
+            ]
+        },
+        {
+            title: "10. Interest And Growth",
+            body: [
+                "For assets, the return percentage estimates appreciation or depreciation from the start date. Appreciating assets increase over time; depreciating assets reduce over time.",
+                "For liabilities, the interest percentage estimates how the outstanding loan grows before repayments. Simple interest grows linearly. Compound interest grows on the accumulated amount."
+            ]
+        },
+        {
+            title: "11. Clean Entry Habits",
+            body: [
+                "Use consistent names. For example, always use Rent instead of sometimes Rent, House Rent, and Flat Payment. Consistency makes Top Spend and expense averages easier to trust.",
+                "Add one real-world event at a time. If salary arrives in the bank, add one income. If rent leaves that bank, add one expense. If you invest from that bank, add one buy asset."
+            ]
+        },
+        {
+            title: "12. Recommended First Setup",
+            body: [
+                "Start by creating accounts with current balances. Add this month&apos;s income. Add recurring expenses. Add active assets. Add outstanding loans. Then add any EMI schedules that should continue from now.",
+                "After setup, check Total Cash against your real account balances. Then check Assets, Liabilities, and Net Worth. If those match reality, the dashboard is ready for daily use."
+            ]
+        }
+    ];
+
+    const metrics = [
+        ["Income", "All income transactions added to accounts. Loans are not counted as income."],
+        ["Expense", "Expense transactions plus loan repayments and due EMI schedules."],
+        ["Total Cash", "All account opening balances plus cash movements from activity."],
+        ["Net Worth", "Total Cash plus current asset value minus outstanding liabilities."],
+        ["Savings", "Percentage of income left after expenses. Formula: (income - expenses) / income."],
+        ["Emergency", "How many expense cycles current cash can cover. Formula: total cash / expenses."],
+        ["Status", "A quick savings-rate label: Strong, Stable, or Vulnerable."],
+        ["Top Spend", "The expense category with the highest total spending."],
+        ["3M Avg Expense", "Average monthly spend across the latest three months that have expenses."],
+        ["Avg Transaction Size", "Average outgoing transaction size, including expenses and loan payments."],
+        ["Monthly Flow", "Income minus expenses in the latest month with activity."],
+        ["MRR", "Average monthly salary income across months where salary was recorded."]
+    ];
+
+    const workflowRows = [
+        ["Salary received", "Income", "Select the account that received salary. Use salary subtype."],
+        ["Paid rent", "Expense", "Select the account used for payment. Description can be Rent."],
+        ["Bought mutual fund", "Buy Asset", "Select the paying account. Add return assumptions if useful."],
+        ["Sold investment", "Sell Asset", "Select the asset and receiving account."],
+        ["Took a loan", "New Loan", "Select account receiving money. Enter interest and EMI if applicable."],
+        ["Paid loan installment", "Repay Loan", "Select the liability so outstanding debt reduces."]
+    ];
+
+    return `
+<div class="guide-hero">
+    <div>
+        <div class="profile-kicker">Operating Manual</div>
+        <h2>How to keep Arbor accurate from day one.</h2>
+        <p>Read this once before entering real data. The rule is simple: accounts show where cash lives, activity explains what changed, assets show what you own, and liabilities show what you owe.</p>
+    </div>
+    <div class="guide-checklist">
+        <span>Start with accounts</span>
+        <span>Record real events</span>
+        <span>Review metrics monthly</span>
+    </div>
+</div>
+
+<div class="guide-grid">
+    ${guideSections.map(section => `
+    <div class="guide-panel">
+        <h2>${section.title}</h2>
+        ${section.body.map(paragraph => `<p>${paragraph}</p>`).join("")}
+    </div>
+    `).join("")}
+
+    <div class="guide-panel guide-wide">
+        <h2>Metric Glossary</h2>
+        <div class="guide-metric-list">
+            ${metrics.map(([label, description]) => `
+            <div>
+                <strong>${label}</strong>
+                <span>${description}</span>
+            </div>
+            `).join("")}
+        </div>
+    </div>
+
+    <div class="guide-panel guide-wide">
+        <h2>Which Button Should I Use?</h2>
+        <div class="guide-table">
+            ${workflowRows.map(([event, action, note]) => `
+            <div class="guide-table-row">
+                <span>${event}</span>
+                <strong>${action}</strong>
+                <p>${note}</p>
+            </div>
+            `).join("")}
+        </div>
+    </div>
+
+    <div class="guide-panel guide-wide">
+        <h2>Common Mistakes To Avoid</h2>
+        <p>Do not mix profiles if the finances should stay separate. Do not use accounts as categories. Do not add loans as income. Do not repay a loan as a normal expense if you want the liability to reduce. Do not delete accounts with history, because old transactions need that account to keep balances explainable.</p>
+        <p>When numbers look wrong, check these in order: account opening balances, transaction dates, selected accounts, linked asset or liability, duplicate entries, and old EMI schedules that are still active.</p>
+    </div>
+</div>
+`;
 }
 
 
@@ -42,38 +263,70 @@ async function renderProfiles(user) {
     let selectedType = "personal";
 
     document.body.innerHTML = `
-    <div class="container">
-      <div class="card">
-
-        <h1>Arbor</h1>
-        <p>${user.email}</p>
-
-        <div class="profiles-grid">
-          ${profiles.length === 0 
-    ? "<p>No profiles yet</p>"
-    : profiles.map(p => `
-            <div class="profile-card" data-id="${p.id}">
-                <div class="profile-icon">${p.name ? p.name[0].toUpperCase() : "P"}</div>
-                <div class="profile-name">${p.name}</div>
-                <div class="profile-sub">${p.type}</div>
+    <div class="profile-shell">
+        <header class="profile-topbar">
+            <div>
+                <div class="brand-mark">Arbor</div>
+                <p>${escapeHTML(user.email)}</p>
             </div>
-          `).join("")}
-        </div>
+            <button id="logout" class="top-action danger-action">Logout</button>
+        </header>
 
-        <h2>Create Profile</h2>
+        <main class="profile-layout">
+            <section class="profile-hero-panel">
+                <div class="profile-kicker">Workspace Selection</div>
+                <h1>Choose the financial workspace you want to manage.</h1>
+                <p>Keep personal, business, and family finances separate while using the same account, metric, and ledger system.</p>
+                <div class="profile-stats">
+                    <div><strong>${profiles.length}</strong><span>Profiles</span></div>
+                    <div><strong>3</strong><span>Workspace Types</span></div>
+                </div>
+            </section>
 
-        <input id="profileName" placeholder="Profile Name" />
+            <section class="profile-card-panel">
+                <div class="panel-title-row">
+                    <div>
+                        <h2>Your Profiles</h2>
+                        <p>Select a workspace to open its dashboard.</p>
+                    </div>
+                </div>
 
-        <div class="select">
-          <button id="personalBtn" class="active">Personal</button>
-          <button id="businessBtn">Business</button>
-          <button id="familyBtn">Family</button>
-        </div>
+                <div class="profiles-grid">
+                    ${profiles.length === 0
+        ? `<div class="empty-state">No profiles yet. Create one below to start tracking.</div>`
+        : profiles.map(p => `
+                        <button class="profile-card" data-id="${p.id}">
+                            <div class="profile-icon">${p.name ? escapeHTML(p.name[0].toUpperCase()) : "P"}</div>
+                            <div class="profile-info">
+                                <div class="profile-name">${escapeHTML(p.name)}</div>
+                                <div class="profile-sub">${escapeHTML(p.type)}</div>
+                            </div>
+                            <span>Open</span>
+                        </button>
+                    `).join("")}
+                </div>
 
-        <button id="createProfile" class="primary">Create</button>
-        <button id="logout" class="secondary">Logout</button>
+                <div class="create-profile-panel">
+                    <div class="panel-title-row">
+                        <div>
+                            <h2>Create Profile</h2>
+                            <p>Use a clear name like Personal, Studio, Family, or Startup.</p>
+                        </div>
+                    </div>
 
-      </div>
+                    <input id="profileName" placeholder="Profile name" />
+                    <div id="profileMessage" class="auth-message" role="status"></div>
+
+                    <div class="select profile-type-toggle">
+                        <button id="personalBtn" class="active">Personal</button>
+                        <button id="businessBtn">Business</button>
+                        <button id="familyBtn">Family</button>
+                    </div>
+
+                    <button id="createProfile" class="primary">Create Profile</button>
+                </div>
+            </section>
+        </main>
     </div>
     `;
 
@@ -93,24 +346,38 @@ async function renderProfiles(user) {
 
     // click profile
     document.querySelectorAll(".profile-card").forEach(card => {
-        card.onclick = () => {
-    console.log("Clicked profile:", card.dataset.id);
-
-    localStorage.setItem("selectedProfile", card.dataset.id);
-    renderApp(user);
-};
+        card.onclick = async () => {
+            localStorage.setItem("selectedProfile", card.dataset.id);
+            await renderApp(user);
+        };
     });
 
     // create profile
     document.getElementById("createProfile").onclick = async () => {
         const name = document.getElementById("profileName").value.trim();
+        const profileMessage = document.getElementById("profileMessage");
 
 if (!name) {
-    alert("Enter profile name");
+    profileMessage.textContent = "Enter a profile name.";
+    profileMessage.className = "auth-message error";
     return;
 }
-        await createProfile(user.uid, selectedType, name);
-        renderApp(user); // 🔥 no reload
+        if (profiles.some(p => p.name?.trim().toLowerCase() === name.toLowerCase())) {
+            profileMessage.textContent = "A profile with this name already exists.";
+            profileMessage.className = "auth-message error";
+            return;
+        }
+
+        try {
+            profileMessage.textContent = "Creating profile...";
+            profileMessage.className = "auth-message info";
+            await createProfile(user.uid, selectedType, name);
+            await renderApp(user);
+        } catch (error) {
+            console.error("Profile creation failed:", error);
+            profileMessage.textContent = "Could not create profile. Please try again.";
+            profileMessage.className = "auth-message error";
+        }
     };
 
     document.getElementById("logout").onclick = async () => {
@@ -132,31 +399,20 @@ document.querySelectorAll(".section h2").forEach(header => {
 async function renderDashboard(user, profileId) {
 
 // LOAD ONLY IF EMPTY
-if (
-    state.transactions.length === 0 ||
-    state.accounts.length === 0
-) {
-    const [assets, liabilities, allTransactions, accounts, emis] = await Promise.all([
-        getAssets(profileId),
-        getLiabilities(profileId),
-        getTransactions(profileId),
-        getAccounts(profileId),
-        getEMIs(profileId)
-    ]);
+const [assets, liabilities, allTransactions, accounts, emis] = await Promise.all([
+    getAssets(profileId),
+    getLiabilities(profileId),
+    getTransactions(profileId),
+    getAccounts(profileId),
+    getEMIs(profileId)
+]);
 
-    state.assets = assets;
-    state.liabilities = liabilities;
-    state.transactions = allTransactions;
-    state.accounts = accounts;
-    state.emis = emis;
-}
+state.assets = assets;
+state.liabilities = liabilities;
+state.transactions = allTransactions;
+state.accounts = accounts;
+state.emis = emis;
 
-// USE STATE
-const assets = state.assets;
-const liabilities = state.liabilities;
-const allTransactions = state.transactions;
-const accounts = state.accounts;
-const emis = state.emis;
 
 // AUTO CREATE DEFAULT ACCOUNT
 if (!accounts || accounts.length === 0) {
@@ -185,7 +441,10 @@ function calculateAssetValue(a) {
         }
     }
 
-    const rate = a.rate ? a.rate : 5; // default 5%
+    const parsedRate = Number(a.rate);
+    const rate = a.rate === null || a.rate === undefined || a.rate === "" || !Number.isFinite(parsedRate)
+        ? 5
+        : parsedRate;
 
     const direction = a.type === "depreciating" ? -1 : 1;
 
@@ -213,7 +472,10 @@ function calculateLiabilityValue(l) {
         }
     }
 
-    const rate = l.rate ? l.rate : 8; // default loan rate
+    const parsedRate = Number(l.rate);
+    const rate = l.rate === null || l.rate === undefined || l.rate === "" || !Number.isFinite(parsedRate)
+        ? 8
+        : parsedRate;
 
    if (l.type === "compound") {
     return l.value * Math.pow(1 + rate / 100, years);
@@ -222,31 +484,24 @@ function calculateLiabilityValue(l) {
 }
 }
 
-let adjustedAssets = 0;
+function getLiabilityOutstanding(l) {
+    const repayments = allTransactions
+        .filter(t => t.type === "liability_payment" && t.liabilityId === l.id)
+        .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-assets.forEach(a => {
-    const base = calculateAssetValue(a);
+    return Math.max(0, calculateLiabilityValue(l) - repayments);
+}
 
+function getAssetCurrentValue(a) {
     const netFlow = allTransactions
         .filter(t => t.assetId === a.id)
         .reduce((sum, t) => {
-            if (t.type === "buy") return sum + t.amount;
-            if (t.type === "sell") return sum - t.amount;
+            if (t.type === "asset_sell" || t.type === "sell") return sum - Number(t.amount || 0);
             return sum;
         }, 0);
 
-    adjustedAssets += base + netFlow;
-});
-
-let adjustedLiabilities = 0;
-
-liabilities.forEach(l => {
-    adjustedLiabilities += calculateLiabilityValue(l);
-});
-
-
-  
-
+    return Math.max(0, calculateAssetValue(a) + netFlow);
+}
 
 const selectedMonth = localStorage.getItem("selectedMonth");
 
@@ -272,8 +527,10 @@ transactions.sort((a, b) => {
     return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
 });
 
+
 const metrics = computeFinancials(state);
 const netWorth = metrics.netWorth;
+
 const {
     income,
     expense,
@@ -288,25 +545,116 @@ const {
     avgExpense,
     avgTransaction,
     lastMonthFlow
-} = computeFinancials(state);
+} = metrics;
+let activeView = localStorage.getItem("dashboardView") || "overview";
+if (!["overview", "accounts", "activity", "guide"].includes(activeView)) {
+    activeView = "overview";
+}
+const accountRows = accounts.map(a => {
+    const balance = accountBalances[a.id] || 0;
+    const transactionCount = allTransactions.filter(t => t.accountId === a.id).length;
+    const typeLabel = readableType(a.type);
+    const details = a.type === "bank" && a.subtype
+        ? `${typeLabel} • ${a.subtype}${a.rate ? ` • ${a.rate}% interest` : ""}`
+        : typeLabel;
+
+    return `
+        <div class="list-item account-item">
+            <div>
+                <div class="title">${escapeHTML(a.name)}</div>
+                <div class="sub">${escapeHTML(details)} • Opening ${formatMoney(a.openingBalance || 0)} • ${transactionCount} entries</div>
+            </div>
+            <div class="item-actions">
+                <strong class="${balance >= 0 ? "green" : "red"}">${formatMoney(balance)}</strong>
+                <button class="delete-account" data-id="${a.id}" title="Delete account">×</button>
+            </div>
+        </div>
+    `;
+}).join("");
+
+const accountNameById = Object.fromEntries(accounts.map(a => [a.id, a.name]));
+
+const transactionRows = transactions.length
+    ? transactions.map(t => `
+        <div class="list-item">
+            <div>
+                <div class="title">${escapeHTML(t.category || "Untitled transaction")}</div>
+                <div class="sub">${readableType(t.type)} • ${t.subtype ? `${escapeHTML(t.subtype)} • ` : ""}${escapeHTML(accountNameById[t.accountId] || "No account")} • ${t.date ? new Date(t.date).toLocaleDateString() : "No date"}</div>
+            </div>
+            <div class="item-actions">
+                <strong class="${t.type === "income" || t.type === "asset_sell" || t.type === "liability_add" ? "green" : "red"}">${formatMoney(t.amount)}</strong>
+                <button class="delete" data-id="${t.id}" title="Delete transaction">×</button>
+            </div>
+        </div>
+    `).join("")
+    : `<div class="empty-state">No transactions yet. Add income, expenses, assets, or loans from the Add panel.</div>`;
+
+const assetRows = assets.length
+    ? assets.filter(a => !a.startDate || new Date(a.startDate) <= new Date()).map(a => `
+        <div class="list-item">
+            <div>
+                <div class="title">${escapeHTML(a.name)}</div>
+                <div class="sub">${readableType(a.type)} • ${a.rate || 0}% • ${a.compounding || "simple"}</div>
+            </div>
+            <div class="item-actions">
+                <strong>${formatMoney(getAssetCurrentValue(a))}</strong>
+                <button class="delete-asset" data-id="${a.id}" title="Delete asset">×</button>
+            </div>
+        </div>
+    `).join("")
+    : `<div class="empty-state">No assets yet. Use Buy asset when you purchase an investment or valuable item.</div>`;
+
+const liabilityRows = liabilities.length
+    ? liabilities.map(l => `
+        <div class="list-item">
+            <div>
+                <div class="title">${escapeHTML(l.name)}</div>
+                <div class="sub">${l.rate || 0}% • ${l.type || "simple"} interest</div>
+            </div>
+            <div class="item-actions">
+                <strong class="red">${formatMoney(getLiabilityOutstanding(l))}</strong>
+                <button class="delete-liability" data-id="${l.id}" title="Delete liability">×</button>
+            </div>
+        </div>
+    `).join("")
+    : `<div class="empty-state">No loans or liabilities yet. Use New loan when money is borrowed.</div>`;
+
+const emiRows = state.emis.length
+    ? state.emis.map(e => `
+        <div class="list-item">
+            <div>
+                <div class="title">${escapeHTML(e.name || "EMI")}</div>
+                <div class="sub">Due ${e.nextDate ? new Date(e.nextDate).toLocaleDateString() : "not set"}${e.tenure ? ` • ${e.tenure} months` : ""}</div>
+            </div>
+            <div class="item-actions">
+                <strong class="red">${formatMoney(e.amount)}</strong>
+                <button class="delete-emi" data-id="${e.id}" title="Delete EMI">×</button>
+            </div>
+        </div>
+    `).join("")
+    : `<div class="empty-state">No EMI schedule yet. Add one while creating a new loan.</div>`;
    document.body.innerHTML = `
 <div class="app">
 
     <!-- TOP BAR -->
     <div class="topbar">
     <div class="left">
-        <button id="togglePanel">☰</button>
-        <button id="backBtn">←</button>
+        <button id="togglePanel" class="top-action primary-action">Add Data</button>
+        <button id="backBtn" class="top-action">Profiles</button>
     </div>
 
-    <div class="center">Dashboard</div>
+    <div class="center">Arbor Dashboard</div>
 
     <div class="right">
-        <button id="logout">Logout</button>
+        <button id="logout" class="top-action danger-action">Logout</button>
     </div>
 </div>
-       
 
+    <div class="dashboard-tabs">
+        <button class="view-tab ${activeView === "overview" ? "active" : ""}" data-view="overview">Overview</button>
+        <button class="view-tab ${activeView === "accounts" ? "active" : ""}" data-view="accounts">Accounts</button>
+        <button class="view-tab ${activeView === "activity" ? "active" : ""}" data-view="activity">Activity</button>
+        <button class="view-tab ${activeView === "guide" ? "active" : ""}" data-view="guide">Guide</button>
     </div>
 
     <div class="layout">
@@ -314,325 +662,279 @@ const {
         <!-- LEFT SIDE -->
         <div class="main">
 
-            
+${activeView === "overview" ? `
+<div class="page-heading">
+    <div>
+        <h1>Financial Overview</h1>
+        <p>Track cash, spending, investments, loans, and repayment health in one place.</p>
+    </div>
+    <button id="openAddPanel" class="btn-primary compact" data-open-panel="activity">Add entry</button>
+</div>
+
 <div class="metrics-row">
 
     <div class="metric-box">
         <div>Income</div>
-        <strong>₹${income}</strong>
+        <strong>${formatMoney(income)}</strong>
+        <span>Money added to accounts.</span>
     </div>
 
     <div class="metric-box">
         <div>Expense</div>
-        <strong>₹${expense}</strong>
+        <strong>${formatMoney(expense)}</strong>
+        <span>Spending plus loan payments.</span>
     </div>
 
     <div class="metric-box ${totalCash>=0?'green':'red'}">
     <div>Total Cash</div>
-<strong>₹${Math.round(totalCash)}</strong>
+<strong>${formatMoney(totalCash)}</strong>
+<span>Sum of all account balances.</span>
 </div>
 
     
     <div class="metric-box">
         <div>Net Worth</div>
-        <strong>₹${netWorth}</strong>
+        <strong>${formatMoney(netWorth)}</strong>
+        <span>Cash + assets - liabilities.</span>
     </div>
 
     <div class="metric-box">
         <div>Savings</div>
         <strong>${(savingsRate * 100).toFixed(1)}%</strong>
+        <span>Income left after expenses.</span>
     </div>
 
     <div class="metric-box">
         <div>Emergency</div>
         <strong>${emergencyCoverage.toFixed(1)}x</strong>
+        <span>Cash divided by expenses.</span>
     </div>
 
     <div class="metric-box">
         <div>Status</div>
         <strong>${status}</strong>
+        <span>Based on savings rate.</span>
     </div>
 
     <div class="metric-box">
         <div>Top Spend</div>
         <strong>${topCategory}</strong>
+        <span>Largest expense category.</span>
     </div>
 
     <div class="metric-box">
     <div>3M Avg Expense</div>
-    <strong>₹${Math.round(avgExpense)}</strong>
+    <strong>${formatMoney(avgExpense)}</strong>
+    <span>Average recent monthly spend.</span>
 </div>
 <div class="metric-box">
     <div>Avg Transaction Size</div>
-    <strong>₹${Math.round(avgTransaction)}</strong>
+    <strong>${formatMoney(avgTransaction)}</strong>
+    <span>Typical outgoing entry.</span>
 </div>
 <div class="metric-box ${lastMonthFlow >= 0 ? 'green' : 'red'}">
     <div>Monthly Flow</div>
-    <strong>₹${Math.round(lastMonthFlow)}</strong>
+    <strong>${formatMoney(lastMonthFlow)}</strong>
+    <span>Income minus expenses.</span>
 </div>
 <div class="metric-box">
     <div>MRR</div>
-    <strong>₹${MRR}</strong>
+    <strong>${formatMoney(MRR)}</strong>
+    <span>Average monthly salary income.</span>
 </div>
+</div>
+
+<div class="summary-grid">
+    <div class="section">
+        <h2>Account Balances</h2>
+        <div class="content">${accountRows}</div>
+    </div>
+    <div class="section">
+        <h2>Recent Activity</h2>
+        <div class="content">${transactionRows}</div>
+    </div>
+</div>
+` : ""}
+
+${activeView === "accounts" ? `
+<div class="page-heading">
+    <div>
+        <h1>Accounts</h1>
+        <p>Accounts are where cash lives. Every transaction credits or debits one account.</p>
+    </div>
+    <button id="openAddPanel" class="btn-primary compact" data-open-panel="account">Add account</button>
 </div>
 <div class="section">
-<h2 class="toggle">
-    <span>Accounts</span>
-    <span class="chevron">⌄</span>
-</h2>
-<div class="content">
-
-${accounts.map(a => `
-    <div class="list-item">
-        <div>
-            <div class="title">${a.name}</div>
-            <div class="sub">${a.type}</div>
-        </div>
-        <div>₹${Math.round(accountBalances[a.id] || 0)}</div>
-        <button class="delete-account" data-id="${a.id}">×</button>
+    <h2>Cash Locations</h2>
+    <div class="content">${accountRows}</div>
+</div>
+<div class="two-column">
+    <div class="section">
+        <h2>Assets</h2>
+        <div class="content">${assetRows}</div>
     </div>
-`).join("")}
-
+    <div class="section">
+        <h2>Liabilities</h2>
+        <div class="content">${liabilityRows}</div>
+    </div>
 </div>
-</div>
-            <!-- TRANSACTIONS -->
-            <div class="section">
-                <h2 class="toggle">
-    <span>Transactions</span>
-    <span class="chevron">⌄</span>
-</h2>
-<div class="content">
-
-                ${transactions.map(t => `
-                    <div class="list-item">
-                        <div>
-                            <div class="title">${t.category}</div>
-                            <div class="sub">${t.type} • ${new Date(t.date).toLocaleDateString()}</div>
-                        </div>
-                        <div class="${t.type==="income"?"green":"red"}">
-                            ₹${t.amount}
-                        </div>
-                        <button class="delete" data-id="${t.id}">×</button>
-                    </div>
-                `).join("")}
-            </div>
-</div>
-            <!-- ASSETS -->
-            <div class="section">
-
-                <h2 class="toggle">
-    <span>Assets</span>
-    <span class="chevron">⌄</span>
-</h2>
-<div class="content">
-    
-
-                ${assets.filter(a => {
-    if (!a.startDate) return true;
-    return new Date(a.startDate) <= new Date();
-}).map(a => `
-                    <div class="list-item expandable">
-                        <div>
-                            <div class="title">${a.name}</div>
-                            <div class="sub">${a.type} • ${a.rate || 0}%</div>
-                        </div>
-                        <div>₹${Math.round(
-    calculateAssetValue(a) +
-    allTransactions
-        .filter(t => t.assetId === a.id)
-        .reduce((sum, t) => {
-            if (t.type === "buy") return sum + t.amount;
-            if (t.type === "sell") return sum - t.amount;
-            return sum;
-        }, 0)
-)}</div>
-                        <button class="delete-asset" data-id="${a.id}">×</button>
-                    </div>
-                `).join("")}
-            </div>
-</div>
-            <!-- LIABILITIES -->
-            <div class="section">
-                <h2 class="toggle">
-    <span>Liabilities</span>
-    <span class="chevron">⌄</span>
-</h2>
-<div class="content">
-   
-
-                ${liabilities.map(l => `
-                    <div class="list-item">
-                        <div>
-                            <div class="title">${l.name}</div>
-                            <div class="sub">${l.rate || 0}%</div>
-                        </div>
-                        <div class="red">₹${Math.round(calculateLiabilityValue(l))}</div>
-                        <button class="delete-liability" data-id="${l.id}">×</button>
-                    </div>
-                `).join("")}
-            </div>
-</div>
-
 <div class="section">
-<h2 class="toggle">
-    <span>EMIs</span>
-    <span class="chevron">⌄</span>
-</h2>
-<div class="content">
+    <h2>EMI Schedule</h2>
+    <div class="content">${emiRows}</div>
+</div>
+` : ""}
 
-${emis.map(e => `
-    <div class="list-item">
-        <div>
-            <div class="title">${e.name || "EMI"}</div>
-            <div class="sub">Due: ${new Date(e.nextDate).toLocaleDateString()}</div>
-        </div>
-        <div class="red">₹${e.amount}</div>
-        <button class="delete-emi" data-id="${e.id}">×</button>
+${activeView === "activity" ? `
+<div class="page-heading">
+    <div>
+        <h1>Activity</h1>
+        <p>Review all income, expenses, investments, asset sales, loans, and repayments.</p>
     </div>
-`).join("")}
+    <button id="openAddPanel" class="btn-primary compact" data-open-panel="activity">Add transaction</button>
+</div>
+<div class="section">
+    <h2>Transaction Ledger</h2>
+    <div class="content">${transactionRows}</div>
+</div>
+` : ""}
 
+${activeView === "guide" ? `
+<div class="page-heading">
+    <div>
+        <h1>First-Time Guide</h1>
+        <p>A complete manual for setting up clean data, choosing the right entry type, and trusting every metric.</p>
+    </div>
 </div>
-</div>
+${renderGuideContent()}
+` : ""}
 <div class="overlay" id="overlay"></div>
         </div>
 
         <!-- RIGHT PANEL -->
         <div class="side">
-<h3>Add Account</h3>
+<div class="panel-head">
+    <div>
+        <h2>Command Panel</h2>
+        <p>Add one clean record at a time. Accounts are cash locations; activity changes balances.</p>
+    </div>
+    <button id="closePanel" class="icon-btn" title="Close">×</button>
+</div>
 
-<input id="accName" placeholder="Account Name" />
+<div class="panel-tabs">
+    <button class="panel-tab active" data-panel="activity">Add Activity</button>
+    <button class="panel-tab" data-panel="account">Add Account</button>
+</div>
 
-<select id="accType">
-  <option value="cash">Cash</option>
-  <option value="bank">Bank</option>
-  <option value="wallet">Wallet</option>
-</select>
-<select id="accSubType" style="display:none;">
-  <option value="savings">Savings</option>
-  <option value="current">Current</option>
-</select>
+<div class="panel-section active" data-panel-section="activity">
+<div class="form-card">
+    <div class="form-label">Activity Type</div>
+    <p class="field-help">Choose the real-world event you want to record.</p>
 
-<input id="accRate" placeholder="Interest %" style="display:none;" />
-<button id="addAccount">Add Account</button>
-            <h3>Add Transaction</h3>
-
-<select id="txnType">
-  <option value="income">Income</option>
-  <option value="expense">Expense</option>
-  <option value="buy">Buy Asset</option>
-  <option value="sell">Sell Asset</option>
-</select>
+    <div class="segmented" id="txnTypeToggle">
+        <button data-value="income" class="active">Income</button>
+        <button data-value="expense">Expense</button>
+        <button data-value="asset_buy">Buy Asset</button>
+        <button data-value="asset_sell">Sell Asset</button>
+        <button data-value="liability_add">New Loan</button>
+        <button data-value="liability_payment">Repay Loan</button>
+    </div>
+</div>
 
 <select id="txnSubType"></select>
 
 <div class="form-group">
     <input id="amount" placeholder="Amount" />
-    <input id="category" placeholder="Description (e.g. Rent, Salary)" />
+    <input id="category" placeholder="Description (e.g. Rent, Salary, Nifty Fund)" />
     
     <select id="accountSelect"></select>
     <select id="assetSelect" style="display:none;"></select>
+    <select id="liabilitySelect" style="display:none;"></select>
 
     <input id="date" type="date" />
 </div>
-
-<button id="addTxn" class="btn-primary">Add</button>
-
-            <h3>Add Asset</h3>
-
-            <div class="form-group">
-    <input id="assetName" placeholder="Name" />
-    <input id="assetValue" placeholder="Value" />
+<div id="assetFields" class="hidden">
     <input id="assetRate" placeholder="Return %" />
+
+    <select id="assetDirection">
+        <option value="appreciating">Appreciating</option>
+        <option value="depreciating">Depreciating</option>
+    </select>
+
+    <select id="assetCompounding">
+        <option value="simple">Simple</option>
+        <option value="compound">Compound</option>
+    </select>
 </div>
-<div class="form-group">
-<div style="display:flex; gap:10px;">
-    <div style="flex:1;">
-        <label style="font-size:11px; color:#64748b;">Start Date</label>
-        <input id="assetStart" type="date" />
+<div id="liabilityFields" class="hidden">
+
+    <div class="form-card">
+        <div class="form-label">Loan Details</div>
+
+        <div class="form-row">
+            <input id="liabilityRate" placeholder="Interest %" />
+            <select id="liabilityCompounding">
+                <option value="simple">Simple Interest</option>
+                <option value="compound">Compound Interest</option>
+            </select>
+        </div>
+
+        <div class="form-row split">
+            <input id="emiTenure" placeholder="Tenure (Months)" />
+            <input id="emiAmount" placeholder="EMI Amount" />
+        </div>
     </div>
 
-    <div style="flex:1;">
-        <label style="font-size:11px; color:#64748b;">End Date (optional)</label>
-        <input id="assetEnd" type="date" />
-    </div>
 </div>
+<button id="addTxn" class="btn-primary">Add</button>
 </div>
 
-<div class="button-group asset-type">
-    <button id="simpleAsset" class="active">Simple</button>
-    <button id="compoundAsset">Compound</button>
-</div>
+<div class="panel-section" data-panel-section="account">
+<div class="form-card">
+    <div class="form-label">Create Account</div>
+    <p class="field-help">Accounts are real places where cash lives. Add one for each balance you want to track.</p>
 
-
-            <div class="button-group asset-type">
-    <button id="appBtn" class="active">Appreciating</button>
-    <button id="depBtn">Depreciating</button>
-</div>
-                
-
-            <button id="addAsset" class="btn-primary">Add Asset</button>
-
-            <h3>Add Liability</h3>
-<div class="form-group">
-            <input id="liabilityName" placeholder="Name" />
-<input id="liabilityValue" placeholder="Amount" />
-<input id="liabilityRate" placeholder="Interest %" />
-</div>
-<div class="form-group">
-<div style="display:flex; gap:10px;">
-    <div style="flex:1;">
-        <label style="font-size:11px; color:#64748b;">Start Date</label>
-        <input id="liabilityStart" type="date" />
+    <div class="form-row">
+        <input id="accName" placeholder="e.g. HDFC Savings, Cash, Paytm Wallet" />
+        <input id="accOpeningBalance" placeholder="Current Balance (optional)" />
     </div>
 
-    <div style="flex:1;">
-        <label style="font-size:11px; color:#64748b;">End Date (optional)</label>
-        <input id="liabilityEnd" type="date" />
+    <div class="form-row">
+        <div class="segmented" id="accTypeToggle">
+            <button data-value="cash" class="active">Cash</button>
+            <button data-value="bank">Bank</button>
+            <button data-value="wallet">Wallet</button>
+        </div>
+    </div>
+
+    <div id="bankDetails" class="bank-details hidden">
+        <div class="form-label">Bank Account Type</div>
+        <div class="segmented compact-segmented" id="accSubTypeToggle">
+            <button data-value="savings" class="active">Savings</button>
+            <button data-value="current">Current</button>
+        </div>
+        <input id="accRate" placeholder="Interest % (optional)" />
     </div>
 </div>
-</div>
-<div class="button-group asset-type">
-    <button id="simpleLiability" class="active">Simple</button>
-    <button id="compoundLiability">Compound</button>
+<button id="addAccount">Add Account</button>
 </div>
 
-            <button id="addLiability" class="btn-primary">Add Liability</button>
-
-        
-<h3>Add EMI</h3>
-
-<input id="emiName" placeholder="Loan Name (e.g. Car Loan)" />
-
-<input id="emiPrincipal" placeholder="Principal Amount" />
-<input id="emiRate" placeholder="Interest % (Annual)" />
-<input id="emiTenure" placeholder="Tenure (Months)" />
-
-<input id="emiAmount" placeholder="EMI Amount" />
-<input id="emiDate" type="date" />
-
-<button id="addEMI">Add EMI</button>
     </div>
 </div>
 </div>
 `;
+
 const panel = document.querySelector(".side");
 document.getElementById("addAccount").onclick = async () => {
-    const name = document.getElementById("accName").value;
-    const accType = document.getElementById("accType").value;
-const subtype = document.getElementById("accSubType").value;
+    const name = document.getElementById("accName").value.trim();
+const subtype = accType === "bank" ? accSubType : null;
     if (!name) return alert("Enter name");
 
     const rate = Number(document.getElementById("accRate").value) || 0;
+    const openingBalance = Number(document.getElementById("accOpeningBalance").value) || 0;
 
-await createAccount(profileId, name, accType, subtype, rate);
+await createAccount(profileId, name, accType, subtype, rate, openingBalance);
 
-// update state
-state.accounts = await getAccounts(profileId);
-
-// re-render
-renderDashboard(user, profileId);
-    closePanel();
-
+await renderDashboard(user, profileId);
 };
 const overlay = document.getElementById("overlay");
 function openPanel() {
@@ -645,36 +947,85 @@ function closePanel() {
     overlay.classList.remove("show");
 }
 
-let selectedAssetId = null;
-let assetType = "appreciating";
-let compounding = "simple";
-let liabilityType = "simple";
+function selectPanel(panelName) {
+    document.querySelectorAll(".panel-tab").forEach(tab => {
+        tab.classList.toggle("active", tab.dataset.panel === panelName);
+    });
 
+    document.querySelectorAll(".panel-section").forEach(section => {
+        section.classList.toggle("active", section.dataset.panelSection === panelName);
+    });
+}
 
-
-
-
-
-const assetSelect = document.getElementById("assetSelect") || { style: {} };
+const assetSelect = document.getElementById("assetSelect");
 const accountSelect = document.getElementById("accountSelect");
-const txnTypeEl = document.getElementById("txnType");
-if (!txnTypeEl) {
+const liabilitySelect = document.getElementById("liabilitySelect");
+let txnType = "income";
+
+document.querySelectorAll(".panel-tab").forEach(btn => {
+    btn.onclick = () => {
+        selectPanel(btn.dataset.panel);
+    };
+});
+
+document.querySelectorAll("#txnTypeToggle button").forEach(btn => {
+    btn.onclick = () => {
+        txnType = btn.dataset.value;
+
+        document.querySelectorAll("#txnTypeToggle button")
+            .forEach(b => b.classList.remove("active"));
+
+        btn.classList.add("active");
+
+        updateDynamicFields();
+        updateSubtypes();
+    };
+});
+if (!txnType) {
     console.error("txnType not found");
 }
+function updateDynamicFields() {
+    const type = txnType;
+
+    // hide everything first
+    document.getElementById("assetFields")?.classList.add("hidden");
+    document.getElementById("liabilityFields")?.classList.add("hidden");
+    if (liabilitySelect) liabilitySelect.style.display = "none";
+
+    // ASSET
+    if (type === "asset_buy") {
+        document.getElementById("assetFields")?.classList.remove("hidden");
+    }
+
+    // LIABILITY (loan)
+    if (type === "liability_add") {
+        document.getElementById("liabilityFields")?.classList.remove("hidden");
+    }
+
+    if (type === "liability_payment" && liabilitySelect) {
+        liabilitySelect.style.display = "block";
+        populateLiabilities();
+    }
+}
+
+
+
 const txnSubTypeEl = document.getElementById("txnSubType") || {
     value: null,
     innerHTML: ""
 };
-
 const subtypeMap = {
-    income: ["salary", "business", "interest", "dividend", "capital_gain"],
+    income: ["salary", "business", "interest", "dividend"],
     expense: ["fixed", "variable", "discretionary"],
-    buy: ["investment"],
-    sell: ["liquidation"]
+    asset_buy: ["investment"],
+    asset_sell: ["liquidation"],
+    liability_add: ["loan"],
+    liability_payment: ["repayment"]
 };
 
+
 function updateSubtypes() {
-    const type = txnTypeEl.value;
+    const type = txnType;
 
     txnSubTypeEl.innerHTML = "";
 
@@ -685,135 +1036,73 @@ subtypeMap[type].forEach(s => {
     });
 
     // asset visibility
-    if (type === "buy" || type === "sell") {
-        assetSelect.style.display = "block";
+    if (type === "asset_sell") {
+        if (assetSelect) assetSelect.style.display = "block";
         populateAssets();
     } else {
-        assetSelect.style.display = "none";
+        if (assetSelect) assetSelect.style.display = "none";
     }
 }
 
-txnTypeEl.onchange = updateSubtypes;
-try {
+if (txnType && txnSubTypeEl) {
+
+updateDynamicFields();
     updateSubtypes();
-} catch (e) {
-    console.error("Subtype init error:", e);
 }
-const accTypeEl = document.getElementById("accType");
-const accSubTypeEl = document.getElementById("accSubType");
-const accRateEl = document.getElementById("accRate");
+let accType = "cash";
+let accSubType = "savings";
 
-accTypeEl.onchange = () => {
-    if (accTypeEl.value === "bank") {
-        accSubTypeEl.style.display = "block";
-        accRateEl.style.display = "block";
-    } else {
-        accSubTypeEl.style.display = "none";
-        accRateEl.style.display = "none";
-    }
-};
-// ASSET TYPE TOGGLE
-document.getElementById("appBtn").onclick = () => {
-    assetType = "appreciating";
-    document.getElementById("appBtn").classList.add("active");
-    document.getElementById("depBtn").classList.remove("active");
-};
+document.querySelectorAll("#accTypeToggle button").forEach(btn => {
+    btn.onclick = () => {
+        accType = btn.dataset.value;
 
-document.getElementById("depBtn").onclick = () => {
-    assetType = "depreciating";
-    document.getElementById("depBtn").classList.add("active");
-    document.getElementById("appBtn").classList.remove("active");
-};
+        document.querySelectorAll("#accTypeToggle button")
+            .forEach(b => b.classList.remove("active"));
 
-// COMPOUNDING
-document.getElementById("simpleAsset").onclick = () => {
-    compounding = "simple";
-    document.getElementById("simpleAsset").classList.add("active");
-    document.getElementById("compoundAsset").classList.remove("active");
-};
+        btn.classList.add("active");
 
-document.getElementById("compoundAsset").onclick = () => {
-    compounding = "compound";
-    document.getElementById("compoundAsset").classList.add("active");
-    document.getElementById("simpleAsset").classList.remove("active");
-};
-
-// LIABILITY TYPE
-document.getElementById("simpleLiability").onclick = () => {
-    liabilityType = "simple";
-    document.getElementById("simpleLiability").classList.add("active");
-    document.getElementById("compoundLiability").classList.remove("active");
-};
-
-document.getElementById("compoundLiability").onclick = () => {
-    liabilityType = "compound";
-    document.getElementById("compoundLiability").classList.add("active");
-    document.getElementById("simpleLiability").classList.remove("active");
-};
-const addEMIBtn = document.getElementById("addEMI");
-
-if (addEMIBtn) {
-    addEMIBtn.onclick = async () => {
-        const name = document.getElementById("emiName").value;
-
-const principal = Number(document.getElementById("emiPrincipal").value);
-const rate = Number(document.getElementById("emiRate").value);
-const tenure = Number(document.getElementById("emiTenure").value);
-
-const amount = Number(document.getElementById("emiAmount").value);
-const nextDate = document.getElementById("emiDate").value;
-let accountId = document.getElementById("accountSelect")?.value;
-
-if (!accountId && accounts.length > 0) {
-    accountId = accounts[0].id;
-}
-        if (!name || !principal || !rate || !tenure || !amount || !nextDate) {
-    return alert("Fill all EMI fields properly");
-}
-
-       const newEMI = {
-    id: "temp-" + Date.now(),
-    name,
-    principal,
-    rate,
-    tenure,
-    amount,
-    nextDate,
-    accountId,
-    remainingPrincipal: principal
-};
-
-        state.emis.push(newEMI);
-
-        renderDashboard(user, profileId);
-
-        createEMI(profileId, {
-    name,
-    amount,        // EMI amount
-    principal,     // total loan
-    rate,          // annual %
-    tenure,        // months
-    startDate,
-    nextDate,
-    accountId
-});
+        // show/hide extra fields
+        document.getElementById("bankDetails")?.classList.toggle("hidden", accType !== "bank");
     };
-}
+});
+
+document.querySelectorAll("#accSubTypeToggle button").forEach(btn => {
+    btn.onclick = () => {
+        accSubType = btn.dataset.value;
+
+        document.querySelectorAll("#accSubTypeToggle button")
+            .forEach(b => b.classList.remove("active"));
+
+        btn.classList.add("active");
+    };
+});
 function populateAccounts() {
+    if (!accountSelect) return;
+
     accountSelect.innerHTML = `<option value="">Select Account</option>`;
     accounts.forEach(a => {
-        accountSelect.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+        accountSelect.innerHTML += `<option value="${a.id}">${escapeHTML(a.name)}</option>`;
     });
 }
 
 populateAccounts();
 function populateAssets() {
+    if (!assetSelect) return;
+
     assetSelect.innerHTML = `<option value="">Select Asset</option>`;
     assets.forEach(a => {
-        assetSelect.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+        assetSelect.innerHTML += `<option value="${a.id}">${escapeHTML(a.name)}</option>`;
     });
 }
 
+function populateLiabilities() {
+    if (!liabilitySelect) return;
+
+    liabilitySelect.innerHTML = `<option value="">Select Loan / Liability</option>`;
+    liabilities.forEach(l => {
+        liabilitySelect.innerHTML += `<option value="${l.id}">${escapeHTML(l.name)} (${formatMoney(getLiabilityOutstanding(l))})</option>`;
+    });
+}
 
 
 
@@ -825,49 +1114,106 @@ const addTxnBtn = document.getElementById("addTxn");
 
 if (addTxnBtn) {
     addTxnBtn.onclick = async () => {
-
-        const cat = document.getElementById("category").value.trim();
-        const rawAmt = document.getElementById("amount").value.trim();
-        const amt = parseFloat(rawAmt);
-
-        if (!rawAmt || isNaN(amt) || amt <= 0) {
-            alert("Enter valid amount");
-            return;
-        }
-
-        if (!cat) {
-            alert("Enter category");
-            return;
-        }
-
-        const rawDate = document.getElementById("date").value;
-        const date = rawDate ? rawDate : new Date().toISOString().slice(0,10);
-
-        
-
-        
+        const type = txnType;
 
 
+const cat = document.getElementById("category").value.trim();
+const amt = Number(document.getElementById("amount").value);
+const date = document.getElementById("date").value || new Date().toISOString().slice(0,10);
+const subtype = document.getElementById("txnSubType")?.value || null;
 
-     
-
-        const selectedAssetId = document.getElementById("assetSelect")?.value || null;
 let accountId = document.getElementById("accountSelect")?.value;
+if (!accountId && accounts.length > 0) accountId = accounts[0].id;
+let assetId = null;
+let liabilityId = null;
 
-// AUTO DEFAULT
-if (!accountId && accounts.length > 0) {
-    accountId = accounts[0].id;
-}
-
-const type = txnTypeEl.value;
-
-if ((type === "buy" || type === "sell") && !selectedAssetId) {
-    alert("Select asset");
+// VALIDATION FIRST
+if (!amt || isNaN(amt) || amt <= 0) {
+    alert("Enter valid amount");
     return;
 }
 
-const subtype = txnSubTypeEl ? txnSubTypeEl.value : null;
+if (!cat) {
+    alert("Enter category");
+    return;
+}
 
+if (!accountId) {
+    alert("Create or select an account first");
+    return;
+}
+
+if (type === "asset_sell") {
+    assetId = document.getElementById("assetSelect")?.value || null;
+
+    if (!assetId) {
+        alert("Select asset");
+        return;
+    }
+}
+
+if (type === "liability_payment") {
+    liabilityId = document.getElementById("liabilitySelect")?.value || null;
+
+    if (!liabilityId) {
+        alert("Select the loan or liability being paid");
+        return;
+    }
+}
+
+// ASSET BUY
+if (type === "asset_buy") {
+    const rate = Number(document.getElementById("assetRate").value) || 5;
+    const direction = document.getElementById("assetDirection").value;
+    const compounding = document.getElementById("assetCompounding").value;
+
+    const assetRef = await addAsset(
+        profileId,
+        cat,
+        amt,
+        rate,
+        direction,
+        date,
+        null,
+        compounding
+    );
+    assetId = assetRef.id;
+}
+
+// LIABILITY ADD
+if (type === "liability_add") {
+    const rate = Number(document.getElementById("liabilityRate").value) || 8;
+    const tenure = Number(document.getElementById("emiTenure").value);
+    const emiAmount = Number(document.getElementById("emiAmount").value);
+    const liabilityMode = document.getElementById("liabilityCompounding")?.value || "simple";
+
+    // create liability
+    const liabilityRef = await addLiability(
+        profileId,
+        cat,
+        amt,
+        rate,
+        date,
+        null,
+        liabilityMode
+    );
+    liabilityId = liabilityRef.id;
+
+    // create EMI automatically
+    if (tenure && emiAmount) {
+        await createEMI(profileId, {
+            name: cat,
+            amount: emiAmount,
+            principal: amt,
+            rate,
+            tenure,
+            nextDate: date,
+            accountId
+        });
+    }
+}
+
+// SAVE TRANSACTION
 await addTransaction(
     profileId,
     amt,
@@ -876,148 +1222,41 @@ await addTransaction(
     date,
     null,
     null,
-    {
-        assetId: selectedAssetId,
-        accountId: accountId,
-        subtype: subtype
-    }
+    { accountId, assetId, liabilityId, subtype }
 );
-
-// fetch fresh data
-state.transactions = await getTransactions(profileId);
-
-// render
-renderDashboard(user, profileId);
-
-
-
-
-        document.getElementById("amount").value = "";
-        document.getElementById("category").value = "";
-
-        closePanel();
-
+await renderDashboard(user, profileId);
     };
-}
-    const addAssetBtn = document.getElementById("addAsset");
-
-if (addAssetBtn) {
-    addAssetBtn.onclick = async () => {
-    const name = document.getElementById("assetName").value;
-    const value = document.getElementById("assetValue").value;
-    const rate = document.getElementById("assetRate").value;
-
-   const startDate = document.getElementById("assetStart").value;
-const endDate = document.getElementById("assetEnd").value;
-
-const compoundingType = compounding;
-
-    if (!name || !value || !startDate) {
-    return alert("Start date is required");
-}
-
-   const newAsset = {
-    id: "temp-" + Date.now(),
-    name,
-    value,
-    rate,
-    type: assetType,
-    startDate,
-    endDate,
-    compounding: compoundingType
-};
-
-state.assets.push(newAsset);
-
-renderDashboard(user, profileId);
-
-addAsset(
-    profileId,
-    name,
-    value,
-    rate,
-    assetType,
-    startDate,
-    endDate,
-    compoundingType
-);
-};
-}
-const addLiabilityBtn = document.getElementById("addLiability");
-
-if (addLiabilityBtn) {
-    addLiabilityBtn.onclick = async () => {
-    const name = document.getElementById("liabilityName").value;
-    const value = document.getElementById("liabilityValue").value;
-    const rate = document.getElementById("liabilityRate").value;
-    const startDate = document.getElementById("liabilityStart").value;
-const endDate = document.getElementById("liabilityEnd").value;
-const liabilityMode = liabilityType;
-
-    if (!name || !value || !startDate) {
-    return alert("Start date is required");
-}
-const newLiability = {
-    id: "temp-" + Date.now(),
-    name,
-    value,
-    rate,
-    startDate,
-    endDate,
-    type: liabilityMode
-};
-
-state.liabilities.push(newLiability);
-
-renderDashboard(user, profileId);
-
-addLiability(
-    profileId,
-    name,
-    value,
-    rate,
-    startDate,
-    endDate,
-    liabilityMode
-);
-
-};
 }
 document.body.onclick = async (e) => {
     // DELETE ACCOUNT
 if (e.target.classList.contains("delete-account")) {
     const id = e.target.dataset.id;
+    const hasTransactions = state.transactions.some(t => t.accountId === id);
 
-    // 🚫 prevent deleting last account
     if (state.accounts.length <= 1) {
         alert("At least one account required");
         return;
     }
 
-    // optimistic UI
-    state.accounts = state.accounts.filter(a => a.id !== id);
-    renderDashboard(user, profileId);
+    if (hasTransactions) {
+        alert("This account has transactions. Keep it so your balances stay accurate.");
+        return;
+    }
 
-    // backend sync
-    deleteAccount(id, profileId)
-        .then(async () => {
-            state.accounts = await getAccounts(profileId);
-        })
-        .catch(err => console.error(err));
+    if (!confirm("Delete this account?")) return;
+
+    await deleteAccount(id, profileId);
+    await renderDashboard(user, profileId);
 }
 
 // DELETE EMI
 if (e.target.classList.contains("delete-emi")) {
     const id = e.target.dataset.id;
 
-    state.emis = state.emis.filter(e => e.id !== id);
-    renderDashboard(user, profileId);
+    if (!confirm("Delete this EMI schedule?")) return;
 
-    deleteEMI(id, profileId)
-        .then(async () => {
-            state.emis = await getEMIs(profileId);
-        })
-        .catch(err => console.error(err));
+    await deleteEMI(id, profileId);
+    await renderDashboard(user, profileId);
 }
     // BACK
     if (e.target.id === "backBtn") {
@@ -1029,7 +1268,7 @@ if (e.target.classList.contains("delete-emi")) {
         emis: []
     };
         localStorage.removeItem("selectedProfile");
-        renderApp(user);
+        await renderApp(user);
     }
 
     // LOGOUT
@@ -1046,57 +1285,63 @@ if (e.target.classList.contains("delete-emi")) {
     }
 
     // PANEL OPEN
-    if (e.target.closest("#togglePanel")) {
+    const panelTrigger = e.target.closest("#togglePanel") || e.target.closest("#openAddPanel");
+    if (panelTrigger) {
+        if (panelTrigger.dataset.openPanel) {
+            selectPanel(panelTrigger.dataset.openPanel);
+        }
         openPanel();
     }
 
     // PANEL CLOSE
-    if (e.target.closest("#overlay")) {
+    if (e.target.closest("#overlay") || e.target.closest("#closePanel")) {
         closePanel();
+    }
+
+    if (e.target.classList.contains("view-tab")) {
+        localStorage.setItem("dashboardView", e.target.dataset.view);
+        await renderDashboard(user, profileId);
     }
 
     // DELETE TXN
  if (e.target.classList.contains("delete")) {
     const id = e.target.dataset.id;
 
-    // 🚫 block temp ids
     if (id.startsWith("temp-")) return;
+    if (!confirm("Delete this transaction?")) return;
 
-    // optimistic UI
-    state.transactions = state.transactions.filter(t => t.id !== id);
-    renderDashboard(user, profileId);
-
-    // backend sync + refetch
-    deleteTransaction(id, profileId)
-        .then(async () => {
-            state.transactions = await getTransactions(profileId);
-        })
-        .catch(err => {
-            console.error(err);
-        });
+    await deleteTransaction(id, profileId);
+    await renderDashboard(user, profileId);
 }
 
     // DELETE ASSET
     if (e.target.classList.contains("delete-asset")) {
-       // remove from state
-state.assets = state.assets.filter(a => a.id !== e.target.dataset.id);
+        const id = e.target.dataset.id;
+        const hasTransactions = state.transactions.some(t => t.assetId === id);
 
-// instant render
-renderDashboard(user, profileId);
+        if (hasTransactions) {
+            alert("This asset has linked transactions. Delete those transactions first.");
+            return;
+        }
 
-// backend
-await deleteAsset(profileId, e.target.dataset.id);
-
+        if (!confirm("Delete this asset?")) return;
+        await deleteAsset(profileId, id);
+        await renderDashboard(user, profileId);
     }
 
     // DELETE LIABILITY
     if (e.target.classList.contains("delete-liability")) {
-       state.liabilities = state.liabilities.filter(l => l.id !== e.target.dataset.id);
+        const id = e.target.dataset.id;
+        const hasTransactions = state.transactions.some(t => t.liabilityId === id);
 
-renderDashboard(user, profileId);
+        if (hasTransactions) {
+            alert("This liability has linked transactions. Delete those transactions first.");
+            return;
+        }
 
-await deleteLiability(profileId, e.target.dataset.id);
-  
+        if (!confirm("Delete this liability?")) return;
+        await deleteLiability(profileId, id);
+        await renderDashboard(user, profileId);
     }
 
     // COLLAPSE
@@ -1128,6 +1373,7 @@ observeAuth(async (user) => {
 
                 <input id="email" placeholder="Email" />
                 <input id="password" type="password" placeholder="Password" />
+                <div id="authMessage" class="auth-message" role="status"></div>
 
                 <button id="login" class="primary">Login</button>
                 <button id="signup" class="secondary">Create Account</button>
@@ -1141,17 +1387,84 @@ observeAuth(async (user) => {
 
         const emailInput = document.getElementById("email");
         const passwordInput = document.getElementById("password");
+        const authMessage = document.getElementById("authMessage");
+        const loginBtn = document.getElementById("login");
+        const signupBtn = document.getElementById("signup");
+        const resetBtn = document.getElementById("reset");
 
-        document.getElementById("signup").onclick = async () => {
-            await signUp(emailInput.value, passwordInput.value);
+        function setAuthMessage(message, type = "error") {
+            authMessage.textContent = message;
+            authMessage.className = `auth-message ${type}`;
+        }
+
+        function setAuthBusy(isBusy) {
+            loginBtn.disabled = isBusy;
+            signupBtn.disabled = isBusy;
+            resetBtn.disabled = isBusy;
+        }
+
+        async function runAuthAction(action, loadingMessage) {
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!email) {
+                setAuthMessage("Enter your email address.");
+                emailInput.focus();
+                return;
+            }
+
+            if (action !== "reset" && !password) {
+                setAuthMessage("Enter your password.");
+                passwordInput.focus();
+                return;
+            }
+
+            setAuthBusy(true);
+            setAuthMessage(loadingMessage, "info");
+
+            try {
+                if (action === "signup") {
+                    const credential = await signUp(email, password);
+                    setAuthMessage("Account created. Loading your workspace...", "success");
+                    await renderApp(credential.user);
+                    return;
+                }
+
+                if (action === "login") {
+                    const credential = await login(email, password);
+                    setAuthMessage("Logged in. Loading your workspace...", "success");
+                    await renderApp(credential.user);
+                    return;
+                }
+
+                await resetPassword(email);
+                setAuthMessage("Password reset email sent.", "success");
+            } catch (error) {
+                console.error("Auth action failed:", error);
+                setAuthMessage(getAuthErrorMessage(error));
+            } finally {
+                setAuthBusy(false);
+            }
+        }
+
+        signupBtn.onclick = async () => {
+            await runAuthAction("signup", "Creating account...");
         };
 
-        document.getElementById("login").onclick = async () => {
-            await login(emailInput.value, passwordInput.value);
+        loginBtn.onclick = async () => {
+            await runAuthAction("login", "Logging in...");
         };
 
-        document.getElementById("reset").onclick = async () => {
-            await resetPassword(emailInput.value);
+        resetBtn.onclick = async () => {
+            await runAuthAction("reset", "Sending reset email...");
        };
+
+        [emailInput, passwordInput].forEach(input => {
+            input.addEventListener("keydown", async (event) => {
+                if (event.key === "Enter") {
+                    await runAuthAction("login", "Logging in...");
+                }
+            });
+        });
     }
 });

@@ -10,6 +10,45 @@ import { db } from "../firebase/db.js";
 import { doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+function createdAtValue(createdAt) {
+    if (!createdAt) return 0;
+    if (typeof createdAt === "number") return createdAt;
+    if (typeof createdAt.seconds === "number") return createdAt.seconds * 1000;
+    return 0;
+}
+
+function applyTransactionToBalances(t, balances) {
+    const acc = t.accountId || "default";
+    const amount = Number(t.amount) || 0;
+
+    if (balances[acc] === undefined) balances[acc] = 0;
+
+    if (t.type === "income") balances[acc] += amount;
+    else if (t.type === "expense") balances[acc] -= amount;
+    else if (t.type === "asset_buy") balances[acc] -= amount;
+    else if (t.type === "asset_sell") balances[acc] += amount;
+    else if (t.type === "liability_add") balances[acc] += amount;
+    else if (t.type === "liability_payment") balances[acc] -= amount;
+    else if (t.type === "transfer") {
+        if (t.from === "cash") balances[acc] -= amount;
+        if (t.to === "cash") balances[acc] += amount;
+    }
+
+    t.balance = balances[acc];
+}
+
+async function getOpeningBalances(profileId) {
+    const snapshot = await getDocs(collection(db, "profiles", profileId, "accounts"));
+    const balances = {};
+
+    snapshot.forEach(accountDoc => {
+        const account = accountDoc.data();
+        balances[accountDoc.id] = Number(account.openingBalance) || 0;
+    });
+
+    return balances;
+}
+
 // DELETE TRANSACTION
 export async function deleteTransaction(transactionId, profileId) {
     await deleteDoc(doc(db, "profiles", profileId, "transactions", transactionId));
@@ -23,19 +62,13 @@ export async function deleteTransaction(transactionId, profileId) {
         return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0);
     });
 
-    // 🔥 RECOMPUTE BALANCES (WITH TRANSFER SUPPORT)
-    let runningBalance = 0;
+    const runningBalances = await getOpeningBalances(profileId);
 
     for (const t of transactions) {
-        if (t.type === "income") runningBalance += t.amount;
-        else if (t.type === "expense") runningBalance -= t.amount;
-        else if (t.type === "transfer") {
-            if (t.from === "cash") runningBalance -= t.amount;
-            if (t.to === "cash") runningBalance += t.amount;
-        }
+        applyTransactionToBalances(t, runningBalances);
 
         await updateDoc(doc(db, "profiles", profileId, "transactions", t.id), {
-            balance: runningBalance
+            balance: t.balance
         });
     }
 }
@@ -43,8 +76,10 @@ export async function deleteTransaction(transactionId, profileId) {
 // ADD TRANSACTION (NO BALANCE LOGIC)
 export async function addTransaction(profileId, amount, type, category, date, from = null, to = null, linkedId = null) {
     const transactions = await getTransactions(profileId);
+    const localId = `new-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const newTxn = {
+    localId,
     amount: Number(amount),
     type,
     category,
@@ -53,6 +88,7 @@ export async function addTransaction(profileId, amount, type, category, date, fr
     to,
     accountId: linkedId?.accountId || null,
     assetId: linkedId?.assetId || null,
+    liabilityId: linkedId?.liabilityId || null,
     subtype: linkedId?.subtype || null,
     createdAt: Date.now()
 };
@@ -63,24 +99,17 @@ export async function addTransaction(profileId, amount, type, category, date, fr
     updated.sort((a, b) => {
         const d = new Date(a.date) - new Date(b.date);
         if (d !== 0) return d;
-        return (a.createdAt || 0) - (b.createdAt || 0);
+        return createdAtValue(a.createdAt) - createdAtValue(b.createdAt);
     });
 
     // 🔥 BALANCE ENGINE (UPDATED FOR TRANSFERS)
-    let runningBalance = 0;
+    const runningBalances = await getOpeningBalances(profileId);
 
     for (const t of updated) {
-        if (t.type === "income") runningBalance += t.amount;
-        else if (t.type === "expense") runningBalance -= t.amount;
-        else if (t.type === "transfer") {
-            if (t.from === "cash") runningBalance -= t.amount;
-            if (t.to === "cash") runningBalance += t.amount;
-        }
-
-        t.balance = runningBalance;
+        applyTransactionToBalances(t, runningBalances);
     }
 
-    const finalTxn = updated[updated.length - 1];
+    const finalTxn = updated.find(t => t.localId === localId);
 
    await addDoc(collection(db, "profiles", profileId, "transactions"), {
     profileId,
@@ -88,16 +117,17 @@ export async function addTransaction(profileId, amount, type, category, date, fr
     type: finalTxn.type,
     category: finalTxn.category,
     date: finalTxn.date,
-    accountId: finalTxn.accountId || null,
-    assetId: finalTxn.assetId || null,
-    subtype: finalTxn.subtype || null,
-    from: finalTxn.from || null,
-    to: finalTxn.to || null,
+
+    assetId: linkedId?.assetId || null,
+    liabilityId: linkedId?.liabilityId || null,
+    accountId: linkedId?.accountId || null,
+    subtype: linkedId?.subtype || null,
+
     balance: finalTxn.balance,
     createdAt: serverTimestamp()
 });
     // UPDATE OLD TXNS
-    const existing = updated.slice(0, -1);
+    const existing = updated.filter(t => t.id);
 
 // Run updates in parallel instead of sequential
 await Promise.all(

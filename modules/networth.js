@@ -18,25 +18,46 @@ export async function deleteAsset(profileId, assetId) {
 export async function deleteLiability(profileId, liabilityId) {
     await deleteDoc(doc(db, "profiles", profileId, "liabilities", liabilityId));
 }
-export async function addAsset(profileId, name, value, rate, type, endDate) {
-    await addDoc(collection(db, "profiles", profileId, "assets"), {
+export async function addAsset(
+    profileId,
+    name,
+    value,
+    rate,
+    type,
+    startDate = null,
+    endDate = null,
+    compounding = "simple"
+) {
+    return await addDoc(collection(db, "profiles", profileId, "assets"), {
         profileId,
         name,
         value: Number(value),
         rate: rate ? Number(rate) : null,
         type,
+        startDate,
         endDate,
+        compounding,
         createdAt: new Date()
     });
 }
 
-export async function addLiability(profileId, name, value, rate, endDate) {
-    await addDoc(collection(db, "profiles", profileId, "liabilities"), {
+export async function addLiability(
+    profileId,
+    name,
+    value,
+    rate,
+    startDate = null,
+    endDate = null,
+    type = "simple"
+) {
+    return await addDoc(collection(db, "profiles", profileId, "liabilities"), {
         profileId,
         name,
         value: Number(value),
         rate: rate ? Number(rate) : null,
+        startDate,
         endDate,
+        type,
         createdAt: new Date()
     });
 }

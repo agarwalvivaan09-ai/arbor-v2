@@ -1,11 +1,12 @@
 import { db } from "../firebase/db.js";
 import { collection, addDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-export async function createAccount(profileId, name, type, subtype = null, rate = 0) {
+export async function createAccount(profileId, name, type, subtype = null, rate = 0, openingBalance = 0) {
     await addDoc(collection(db, "profiles", profileId, "accounts"), {
     name,
     type,
     subtype,
     rate,
+    openingBalance: Number(openingBalance) || 0,
     createdAt: new Date()
 });
 }
